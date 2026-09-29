@@ -88,11 +88,18 @@ export default function WhatsAppPage() {
     setSaveSuccess(false);
 
     try {
-      await api.patch('/whatsapp/config', config);
+      const { id, updatedAt, createdAt, ...payload } = config || {};
+      const res = await api.patch('/whatsapp/config', payload);
+      if (res.data) {
+        setConfig(res.data);
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
-      await alert(err.response?.data?.message || 'Error al guardar la configuración', { type: 'error', title: 'Error al Guardar' });
+      const errorMsg = Array.isArray(err.response?.data?.message)
+        ? err.response?.data?.message.join(', ')
+        : err.response?.data?.message || 'Error al guardar la configuración';
+      await alert(errorMsg, { type: 'error', title: 'Error al Guardar' });
     } finally {
       setSaving(false);
     }

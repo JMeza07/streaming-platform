@@ -239,8 +239,9 @@ export class WhatsappService {
   }
 
   // ACTUALIZAR CONFIGURACIÓN
-  async updateConfig(data: any) {
+  async updateConfig(dto: any) {
     const config = await this.getConfig();
+    const { id, updatedAt, createdAt, ...data } = dto || {};
     const updated = await this.prisma.whatsappConfig.update({
       where: { id: config.id },
       data,

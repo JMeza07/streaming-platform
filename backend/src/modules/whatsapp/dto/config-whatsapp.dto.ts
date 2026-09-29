@@ -2,6 +2,15 @@ import { IsString, IsOptional, IsBoolean, IsObject } from 'class-validator';
 
 export class ConfigWhatsappDto {
   @IsOptional()
+  id?: string;
+
+  @IsOptional()
+  updatedAt?: any;
+
+  @IsOptional()
+  createdAt?: any;
+
+  @IsOptional()
   @IsString()
   nombreConfig?: string;
 
