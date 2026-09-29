@@ -1,0 +1,153 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+:root {
+  --foreground-rgb: 243, 244, 246;
+  --background-start-rgb: 3, 7, 18;
+  --background-end-rgb: 10, 15, 30;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: radial-gradient(circle at 50% 0%, #151c2e 0%, #030712 70%);
+  min-height: 100vh;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #030712;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+/* Custom selection */
+::selection {
+  background-color: #e50914;
+  color: #ffffff;
+}
+
+/* Subtle continuous zoom for pending orders badge/button */
+@keyframes subtle-zoom {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+.animate-subtle-zoom {
+  animation: subtle-zoom 2s ease-in-out infinite;
+}
+
+/* Deshabilitar flechas y scroll de mouse en inputs numéricos */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* ========================================================================= */
+/* ========================================================================= */
+/* ESTÁNDAR GLOBAL UNIFICADO DE VENTANAS MODAL (UI/UX COHERENCIA VISUAL)    */
+/* ========================================================================= */
+/* 
+  Regla estricta del sistema:
+  1. Fondo (Overlay): Translúcido con 45% opacidad (rgba(0, 0, 0, 0.45)), blur de fondo, z-index 9999.
+  2. Medidas Unificadas: Sin importar el contenido, todas las ventanas modales del sistema
+     tienen la MISMA proporción y porcentaje de pantalla:
+     - Ancho unificado: max-w-4xl (56rem / 896px o 92vw en móviles).
+     - Alto unificado: 80vh (80% del alto visible de la pantalla).
+  3. Comportamiento de Scroll:
+     - Header fijo (shrink-0) con botón cerrar (X) siempre visible.
+     - Body con scroll interno único (flex-1 overflow-y-auto).
+     - Footer fijo (shrink-0) con botones de acción siempre visibles.
+*/
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* Capa superior para modales secundarios, de confirmación o abiertos desde otra modal */
+.modal-overlay-secondary {
+  position: fixed;
+  inset: 0;
+  z-index: 10010;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* Capa máxima para visualizadores de imágenes / lightboxes */
+.modal-overlay-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10030;
+  background-color: rgba(0, 0, 0, 0.90);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-standard,
+.modal-container,
+.modal-container-sm,
+.modal-container-md,
+.modal-container-lg,
+.modal-container-xl {
+  width: 100%;
+  max-width: 56rem; /* 896px / max-w-4xl */
+  height: 80vh;     /* 80% fijo de la altura visible del viewport */
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1rem;
+}
+
+.modal-header-fixed {
+  flex-shrink: 0;
+}
+
+.modal-body-scroll {
+  flex: 1 1 0%;
+  overflow-y: auto;
+}
+
+.modal-footer-fixed {
+  flex-shrink: 0;
+}
+
+

@@ -1,0 +1,95 @@
+{
+    # Global options
+    admin off
+    order coraza_waf first
+}
+
+(security_headers) {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-XSS-Protection "1; mode=block"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+}
+
+(waf_protection) {
+    coraza_waf {
+        include /etc/caddy/coraza/coraza.conf
+        include /etc/caddy/coraza/crs-setup.conf
+        include /etc/caddy/coraza/rules/*.conf
+    }
+}
+
+(authelia_middleware) {
+    forward_auth authelia:9091 {
+        uri /api/verify?rd=https://auth.{$DOMAIN:midominio.local}/
+        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    }
+}
+
+# =========================================================================
+# 1. AUTHELIA AUTHENTICATION PORTAL (Zero Trust MFA)
+# =========================================================================
+auth.{$DOMAIN:midominio.local} {
+    import security_headers
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+        format json
+    }
+
+    reverse_proxy authelia:9091
+}
+
+# =========================================================================
+# 2. GRAFANA OBSERVABILITY STACK (Protected by Authelia)
+# =========================================================================
+grafana.{$DOMAIN:midominio.local} {
+    import security_headers
+    import authelia_middleware
+
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+
+    reverse_proxy grafana:3000
+}
+
+# =========================================================================
+# 3. MAIN APPLICATION & API (WAF + Perimeter Ring)
+# =========================================================================
+{$DOMAIN:midominio.local}, www.{$DOMAIN:midominio.local} {
+    import security_headers
+    import waf_protection
+
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 20mb
+            roll_keep 10
+        }
+        format json
+    }
+
+    # Restrict administrative routes behind Authelia MFA
+    handle /admin* {
+        import authelia_middleware
+        reverse_proxy frontend:3000
+    }
+
+    # API endpoints directly route to backend
+    handle /api/* {
+        reverse_proxy backend:3001
+    }
+
+    # All other traffic routes to frontend Next.js
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

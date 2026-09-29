@@ -1,0 +1,14 @@
+{
+  "name": "streaming-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plataforma de streaming y panel administrativo",
+  "scripts": {
+    "start": "start.bat",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:stop": "docker compose stop"
+  }
+}

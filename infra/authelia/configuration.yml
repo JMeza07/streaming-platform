@@ -1,0 +1,65 @@
+theme: dark
+
+server:
+  host: 0.0.0.0
+  port: 9091
+
+log:
+  level: info
+
+totp:
+  issuer: StreamControl-Security
+  period: 30
+  skew: 1
+
+authentication_backend:
+  password_reset:
+    disable: true
+  file:
+    path: /config/users_database.yml
+    password:
+      algorithm: argon2id
+      iterations: 3
+      memory: 65536
+      parallelism: 4
+
+access_control:
+  default_policy: deny
+  rules:
+    # Grafana requires Two Factor authentication
+    - domain:
+        - "grafana.midominio.local"
+        - "grafana.*"
+      policy: two_factor
+
+    # Administrative portal requires Two Factor authentication
+    - domain:
+        - "midominio.local"
+        - "*"
+      resources:
+        - "^/admin.*$"
+      policy: two_factor
+
+session:
+  name: authelia_session
+  same_site: lax
+  inactivity: 1h
+  expiration: 8h
+  remember_me: 1M
+  redis:
+    host: redis
+    port: 6379
+    database_index: 0
+
+regulation:
+  max_retries: 3
+  find_time: 2m
+  ban_time: 15m
+
+storage:
+  local:
+    path: /config/db.sqlite3
+
+notifier:
+  filesystem:
+    filename: /config/notification.txt

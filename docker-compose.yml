@@ -1,0 +1,71 @@
+services:
+  # =======================================================
+  # 1. WHATSAPP EVOLUTION API
+  # =======================================================
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    container_name: streamcontrol-evolution-api
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - evolution-postgres
+    environment:
+      - SERVER_URL=http://localhost:8080
+      - SERVER_PORT=8080
+      - CORS_ORIGIN=*
+      - CORS_METHODS=GET,POST,PUT,DELETE,PATCH
+      - CORS_CREDENTIALS=true
+
+      # Autenticación con API Key
+      - AUTHENTICATION_TYPE=apikey
+      - AUTHENTICATION_API_KEY=streamcontrol_secret_wa_2025
+      - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
+
+      # Identidad de WhatsApp
+      - CONFIG_SESSION_PHONE_CLIENT=StreamControl
+      - CONFIG_SESSION_PHONE_NAME=StreamControl Bot
+
+      # Base de datos PostgreSQL dedicada (Aislada en red interna)
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://postgres:evolution_pass_2025@evolution-postgres:5432/evolution_db
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - DATABASE_SAVE_MESSAGE_UPDATE=true
+      - DATABASE_SAVE_DATA_CONTACTS=true
+      - DATABASE_SAVE_DATA_CHATS=true
+
+      # Caché y Rendimiento
+      - CACHE_REDIS_ENABLED=false
+      - CACHE_LOCAL_ENABLED=true
+
+      # Logs
+      - LOG_LEVEL=ERROR,WARN,INFO
+      - LOG_COLOR=true
+      - LOG_BAILEYS=error
+      - QRCODE_LIMIT=30
+    volumes:
+      - evolution_instances:/evolution/instances
+
+  # =======================================================
+  # 2. BASE DE DATOS DEDICADA PARA EVOLUTION API
+  # Se ejecuta en la red interna para no entrar en conflicto
+  # con el PostgreSQL principal de la tienda (puerto 5432).
+  # =======================================================
+  evolution-postgres:
+    image: postgres:15-alpine
+    container_name: streamcontrol-evolution-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: evolution_pass_2025
+      POSTGRES_DB: evolution_db
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  evolution_instances:
+    name: streamcontrol_evolution_instances
+  evolution_postgres_data:
+    name: streamcontrol_evolution_postgres_data

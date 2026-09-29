@@ -1,0 +1,13 @@
+###############################################################
+#             Authelia Users Database (Zero-Trust MFA)       #
+###############################################################
+users:
+  admin:
+    displayname: "Security Administrator"
+    # Default password is: AdminSecurity2025!
+    # Generated with: authelia crypto hash-password --variant argon2id
+    password: "$argon2id$v=19$m=65536,t=3,p=4$vO0G0l13p8EwhnNn3qN4oQ$r/03f6f1O2o/Qy583Gv+6M4fL83g7s0wB0aJ2N4Q8oU"
+    email: admin@streamcontrol.local
+    groups:
+      - admins
+      - devops

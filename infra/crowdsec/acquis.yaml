@@ -1,0 +1,10 @@
+# CrowdSec Log Acquisition for Caddy
+filenames:
+  - /var/log/caddy/access.log
+labels:
+  type: caddy
+---
+filenames:
+  - /var/log/caddy/coraza.log
+labels:
+  type: coraza-waf

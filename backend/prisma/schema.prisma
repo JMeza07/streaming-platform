@@ -1,0 +1,380 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ USUARIOS Y ROLES ============
+enum UserRole {
+  ADMIN
+  VENDEDOR
+  SOPORTE
+  CLIENTE
+  ASESOR_COMERCIAL
+}
+
+model User {
+  id            String    @id @default(uuid())
+  nombre        String
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  phone         String?
+  rol           UserRole  @default(CLIENTE)
+  activo        Boolean   @default(true)
+  modulosPermitidos String[] @default([]) @map("modulos_permitidos")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  // Relaciones
+  customer      Customer?
+  affiliate     Affiliate?
+  ventasRealizadas Order[]   @relation("OrderVendedor")
+  
+  @@map("users")
+}
+
+// ============ CATÁLOGO ============
+model Service {
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  logoUrl     String?  @map("logo_url")
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  plans       Plan[]
+  
+  @@map("services")
+}
+
+model Plan {
+  id                   String   @id @default(uuid())
+  serviceId            String   @map("service_id")
+  nombrePlan           String   @map("nombre_plan")
+  precio               Decimal
+  resolucion           String?
+  pantallasSimultaneas Int      @default(1) @map("pantallas_simultaneas")
+  duracionDias         Int      @default(30) @map("duracion_dias")
+  garantiaDias         Int      @default(30) @map("garantia_dias")
+  activo               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at")
+  
+  service              Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  accounts             Account[]
+  subscriptions        Subscription[]
+  orderItems           OrderItem[]
+  
+  @@map("plans")
+}
+
+// ============ INVENTARIO ============
+enum AccountStatus {
+  DISPONIBLE
+  OCUPADA
+  VENCIDA
+  DEFECTUOSA
+  BLOQUEADA
+}
+
+model Account {
+  id              String        @id @default(uuid())
+  planId          String        @map("plan_id")
+  emailCuenta     String        @map("email_cuenta")
+  passwordCuenta  String        @map("password_cuenta")
+  perfilAsignado  String?       @map("perfil_asignado")
+  pinPerfil       String?       @map("pin_perfil")
+  estado          AccountStatus @default(DISPONIBLE)
+  batchId         String?       @map("batch_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  
+  plan            Plan          @relation(fields: [planId], references: [id], onDelete: Cascade)
+  batch           SupplierBatch? @relation(fields: [batchId], references: [id])
+  subscriptions   Subscription[]
+  
+  @@unique([planId, emailCuenta])
+  @@map("accounts")
+}
+
+// ============ CLIENTES ============
+model Customer {
+  id                  String   @id @default(uuid())
+  userId              String   @unique @map("user_id")
+  whatsapp            String
+  pais                String?
+  optOutWhatsapp      Boolean  @default(false) @map("opt_out_whatsapp")
+  createdAt           DateTime @default(now()) @map("created_at")
+  
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptions       Subscription[]
+  orders              Order[]
+  notificationLogs    NotificationLog[]
+  supportTickets      SupportTicket[]
+  
+  @@map("customers")
+}
+
+// ============ SUSCRIPCIONES ============
+enum SubscriptionStatus {
+  ACTIVA
+  VENCIDA
+  CANCELADA
+  EN_GARANTIA
+  SUSPENDIDA
+}
+
+model Subscription {
+  id               String             @id @default(uuid())
+  customerId       String             @map("customer_id")
+  planId           String             @map("plan_id")
+  accountId        String             @map("account_id")
+  orderId          String?            @map("order_id")
+  fechaInicio      DateTime           @default(now()) @map("fecha_inicio")
+  fechaVencimiento DateTime           @map("fecha_vencimiento")
+  estado           SubscriptionStatus @default(ACTIVA)
+  autoRenovar      Boolean            @default(false) @map("auto_renovar")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  
+  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  plan             Plan               @relation(fields: [planId], references: [id])
+  account          Account            @relation(fields: [accountId], references: [id])
+  order            Order?             @relation(fields: [orderId], references: [id])
+  notificationLogs NotificationLog[]
+  supportTickets   SupportTicket[]
+  
+  @@index([fechaVencimiento, estado])
+  @@map("subscriptions")
+}
+
+// ============ PEDIDOS ============
+enum OrderStatus {
+  PENDIENTE
+  PAGADO
+  FALLIDO
+  REEMBOLSADO
+  CANCELADO
+}
+
+model Order {
+  id                 String      @id @default(uuid())
+  customerId         String      @map("customer_id")
+  total              Decimal
+  estado             OrderStatus @default(PENDIENTE)
+  metodoPago         String?     @map("metodo_pago")
+  referenciaExterna  String?     @map("referencia_externa")
+  comprobanteUrl     String?     @map("comprobante_url")
+  vendedorId         String?     @map("vendedor_id")
+  vendedorNombre     String?     @map("vendedor_nombre")
+  vendedorPorcentaje Decimal?    @map("vendedor_porcentaje")
+  vendedorComision   Decimal?    @map("vendedor_comision")
+  descripcionVenta   String?     @map("descripcion_venta")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  commissions        Commission[]
+  
+  customer           Customer    @relation(fields: [customerId], references: [id])
+  vendedor           User?       @relation("OrderVendedor", fields: [vendedorId], references: [id])
+  items              OrderItem[]
+  subscriptions      Subscription[]
+  
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String  @id @default(uuid())
+  orderId         String  @map("order_id")
+  planId          String  @map("plan_id")
+  cantidad        Int     @default(1)
+  precioUnitario  Decimal @map("precio_unitario")
+  subtotal        Decimal
+  
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  plan            Plan    @relation(fields: [planId], references: [id])
+  
+  @@map("order_items")
+}
+
+// ============ PROVEEDORES Y LOTES ============
+model SupplierBatch {
+  id                String   @id @default(uuid())
+  proveedorNombre   String   @map("proveedor_nombre")
+  fechaCompra       DateTime @map("fecha_compra")
+  costoTotalLote    Decimal  @map("costo_total_lote")
+  cantidadCuentas   Int      @map("cantidad_cuentas")
+  tasaFalloActual   Decimal  @default(0) @map("tasa_fallo_actual")
+  estadoLote        String   @default("activo") @map("estado_lote")
+  createdAt         DateTime @default(now()) @map("created_at")
+  
+  accounts          Account[]
+  
+  @@map("supplier_batches")
+}
+
+// ============ AFILIADOS / VENDEDORES ============
+model Affiliate {
+  id             String   @id @default(uuid())
+  userId         String   @unique @map("user_id")
+  codigoReferido String   @unique @map("codigo_referido")
+  referidoPor    String?  @map("referido_por")
+  rango          String   @default("bronce")
+  walletBalance  Decimal  @default(0) @map("wallet_balance")
+  createdAt      DateTime @default(now()) @map("created_at")
+  
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commissions    Commission[]
+  withdrawals    WalletWithdrawal[]
+  
+  @@map("affiliates")
+}
+
+model Commission {
+  id             String   @id @default(uuid())
+  affiliateId    String   @map("affiliate_id")
+  orderId        String?  @map("order_id")  // ← Hacerlo opcional
+  tipo           String
+  porcentaje     Decimal
+  montoComision  Decimal  @map("monto_comision")
+  estado         String   @default("disponible")
+  createdAt      DateTime @default(now()) @map("created_at")
+  
+  affiliate      Affiliate @relation(fields: [affiliateId], references: [id])
+  order          Order?    @relation(fields: [orderId], references: [id])  // ← AÑADIR
+  
+  @@map("commissions")
+}
+
+model WalletWithdrawal {
+  id           String   @id @default(uuid())
+  affiliateId  String   @map("affiliate_id")
+  monto        Decimal
+  metodoPago   String?  @map("metodo_pago")
+  datosPago    String?  @map("datos_pago")
+  estado       String   @default("pendiente")
+  createdAt    DateTime @default(now()) @map("created_at")
+  
+  affiliate    Affiliate @relation(fields: [affiliateId], references: [id])
+  
+  @@map("wallet_withdrawals")
+}
+
+// ============ NOTIFICACIONES ============
+model NotificationLog {
+  id             String   @id @default(uuid())
+  customerId     String   @map("customer_id")
+  subscriptionId String?  @map("subscription_id")
+  tipoEvento     String   @map("tipo_evento")
+  canal          String
+  mensajeEnviado String   @map("mensaje_enviado")
+  estadoEnvio    String   @default("pendiente") @map("estado_envio")
+  fechaEnvio     DateTime @default(now()) @map("fecha_envio")
+  
+  customer       Customer     @relation(fields: [customerId], references: [id])
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  
+  @@map("notification_logs")
+}
+
+// ============ SOPORTE ============
+model SupportTicket {
+  id              String   @id @default(uuid())
+  subscriptionId  String   @map("subscription_id")
+  customerId      String   @map("customer_id")
+  motivoReporte   String   @map("motivo_reporte")
+  evidenciaUrl    String?  @map("evidencia_url")
+  estado          String   @default("pendiente_revision")
+  resueltoPor     String?  @map("resuelto_por")
+  createdAt       DateTime @default(now()) @map("created_at")
+  resolvedAt      DateTime? @map("resolved_at")
+  
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id])
+  customer        Customer     @relation(fields: [customerId], references: [id])
+  
+  @@map("support_tickets")
+}
+
+// ============ CONFIG WHATSAPP ============
+model WhatsappConfig {
+  id                       String   @id @default(uuid())
+  nombreConfig             String   @default("Principal") @map("nombre_config")
+  zonaHoraria              String   @default("America/Bogota") @map("zona_horaria")
+  horaInicio               String   @default("09:00:00") @map("hora_inicio")
+  horaFin                  String   @default("20:00:00") @map("hora_fin")
+  notificacionesActivas    Boolean  @default(false) @map("notificaciones_activas")
+  plantillaEntrega         String?  @map("plantilla_entrega")
+  plantillaRecordatorio7d  String?  @map("plantilla_recordatorio_7d")
+  plantillaRecordatorio1d  String?  @map("plantilla_recordatorio_1d")
+  plantillaRecuperacion3d  String?  @map("plantilla_recuperacion_3d")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+  
+  @@map("whatsapp_config")
+}
+
+// ============ CONFIGURACIONES GLOBALES Y MANTENIMIENTO ============
+model SystemSetting {
+  id                   String   @id @default("singleton")
+  mantenimiento        Boolean  @default(false)
+  mensajeMantenimiento String   @default("Estamos realizando mantenimiento programado en la plataforma. Pronto estaremos de vuelta.") @map("mensaje_mantenimiento")
+  nombrePlataforma     String   @default("StreamControl") @map("nombre_plataforma")
+  logoUrl              String?  @map("logo_url")
+  whatsappSoporte      String   @default("+573001234567") @map("whatsapp_soporte")
+  moneda               String   @default("COP")
+  comisionBase         Int      @default(10) @map("comision_base")
+  garantiaDiasBase     Int      @default(30) @map("garantia_dias_base")
+  mediosPago           Json?    @default("[]") @map("medios_pago")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+// ============ AUDITORÍA Y SEGURIDAD ============
+enum AuditSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum AuditCategory {
+  AUTH
+  VENTAS
+  INVENTARIO
+  GARANTIAS
+  USUARIOS
+  CLIENTES
+  FINANZAS
+  SISTEMA
+}
+
+model AuditLog {
+  id            String        @id @default(uuid())
+  accion        String
+  modulo        AuditCategory @default(SISTEMA)
+  severidad     AuditSeverity @default(INFO)
+  descripcion   String
+  detalles      Json?
+  ip            String?
+  userAgent     String?       @map("user_agent")
+  entidadTipo   String?       @map("entidad_tipo")
+  entidadId     String?       @map("entidad_id")
+  exito         Boolean       @default(true)
+  errorMensaje  String?       @map("error_mensaje")
+
+  usuarioId     String?       @map("usuario_id")
+  usuarioNombre String?       @map("usuario_nombre")
+  usuarioEmail  String?       @map("usuario_email")
+  usuarioRol    String?       @map("usuario_rol")
+
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@index([modulo])
+  @@index([severidad])
+  @@index([createdAt])
+  @@index([usuarioId])
+  @@index([entidadId])
+  @@map("audit_logs")
+}
