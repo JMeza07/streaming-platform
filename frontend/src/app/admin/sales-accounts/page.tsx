@@ -25,6 +25,7 @@ import {
   Send,
   Bell,
   Clock,
+  Phone,
 } from 'lucide-react';
 import { useDialog } from '@/components/Dialog';
 
@@ -118,6 +119,45 @@ export default function SalesAccountsPage() {
     navigator.clipboard.writeText(msg);
     setCopiedId(`full-${sub.id}`);
     setTimeout(() => setCopiedId(null), 3000);
+  };
+
+  // Enviar credenciales completas + normas de uso por WhatsApp
+  const handleSendWhatsAppFullAccess = async (sub: any) => {
+    const cred = sub.credenciales;
+    if (!cred?.email) {
+      await alert('Esta cuenta vendida aún no cuenta con credenciales asignadas.', {
+        type: 'warning',
+        title: 'Sin Credenciales',
+      });
+      return;
+    }
+
+    const rawPhone = sub.cliente?.telefono || sub.cliente?.whatsapp || sub.customer?.whatsapp;
+    const phone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
+    if (!phone) {
+      await alert('Este cliente no tiene un número de WhatsApp registrado.', {
+        type: 'warning',
+        title: 'Sin Teléfono de WhatsApp',
+      });
+      return;
+    }
+
+    const msg = [
+      `Hola *${sub.cliente?.nombre || 'Estimado Cliente'}* 👋, aquí tienes los detalles de acceso y credenciales de tu servicio:`,
+      ``,
+      `🎬 *${sub.plataforma}* — ${sub.planNombre}`,
+      ``,
+      `📧 *Correo:* ${cred.email}`,
+      `🔑 *Contraseña:* ${cred.password || 'N/A'}`,
+      cred.perfil ? `👤 *Perfil:* ${cred.perfil}` : null,
+      cred.pin ? `🔒 *PIN:* ${cred.pin}` : null,
+      `📅 *Vencimiento:* ${sub.fechaFin ? new Date(sub.fechaFin).toLocaleDateString('es-CO') : 'N/A'}`,
+      ``,
+      TERMS_MESSAGE,
+    ].filter(Boolean).join('\n');
+
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
   };
 
   const toggleReveal = (id: string) => {
@@ -562,7 +602,20 @@ export default function SalesAccountsPage() {
                             <Tv className="w-4 h-4 text-red-400" />
                           </div>
                           <div>
-                            <div className="font-semibold text-white">{sub.plataforma}</div>
+                            <div className="font-semibold text-white flex items-center gap-1.5">
+                              <span>{sub.plataforma}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSendWhatsAppFullAccess(sub);
+                                }}
+                                className="text-emerald-400 hover:text-emerald-300 p-0.5 rounded hover:bg-emerald-950/50 transition-colors cursor-pointer"
+                                data-tooltip="Enviar credenciales y términos por WhatsApp"
+                                title="Enviar credenciales y términos por WhatsApp"
+                              >
+                                <Phone className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                             <div className="text-[10px] text-gray-400">{sub.planNombre}</div>
                           </div>
                         </div>
@@ -660,6 +713,14 @@ export default function SalesAccountsPage() {
                                   <Copy className="w-3 h-3" />
                                 )}
                               </button>
+                              <button
+                                onClick={() => handleSendWhatsAppFullAccess(sub)}
+                                className="text-emerald-400 hover:text-emerald-300 shrink-0 p-0.5 transition-colors"
+                                data-tooltip="Enviar credenciales y normas por WhatsApp"
+                                title="Enviar credenciales y normas por WhatsApp"
+                              >
+                                <Phone className="w-3 h-3" />
+                              </button>
                             </div>
 
                             <div className="flex items-center gap-1 text-[11px] text-gray-300 font-mono truncate">
@@ -739,6 +800,16 @@ export default function SalesAccountsPage() {
                       {/* Acciones - Solo recordatorios WhatsApp */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="flex flex-col items-end gap-1">
+                          {/* Enviar credenciales completas + normas por WhatsApp */}
+                          <button
+                            onClick={() => handleSendWhatsAppFullAccess(sub)}
+                            data-tooltip="Enviar acceso completo y normas de uso por WhatsApp"
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-semibold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-800/80 hover:border-emerald-700 transition-colors cursor-pointer"
+                          >
+                            <Phone className="w-3 h-3 text-emerald-400" />
+                            <span>Enviar WhatsApp</span>
+                          </button>
+
                           {/* Copiar acceso completo + normas */}
                           <button
                             onClick={() => handleCopyFullAccess(sub)}

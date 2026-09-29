@@ -40,12 +40,78 @@ import {
 import { useDialog } from '@/components/Dialog';
 import Cookies from 'js-cookie';
 
+// Normas de Uso y Condiciones adjuntas a cada entrega de suscripción
+const TERMS_MESSAGE = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 NORMAS DE USO Y CONDICIONES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ PERMITIDO:
+• Usar el servicio de forma personal en el perfil/pantalla asignada.
+• Disfrutar el contenido dentro de los límites del plan adquirido.
+
+❌ PROHIBIDO (puede causar CANCELACIÓN inmediata sin reembolso):
+• Compartir las credenciales con terceros no autorizados.
+• Cambiar la contraseña, nombre del perfil o PIN sin autorización.
+• Agregar o eliminar perfiles de la cuenta.
+• Acceder desde más dispositivos de los permitidos simultáneamente.
+• Intentar hacer descargas masivas o uso comercial del servicio.
+• Ceder, vender o transferir el acceso a otra persona.
+
+⚠️ IMPORTANTE:
+• El incumplimiento de estas normas resultará en la SUSPENSIÓN o CANCELACIÓN inmediata de su cuenta SIN derecho a reembolso.
+• Si detecta problemas técnicos, comuníquese con soporte ANTES de hacer cualquier cambio en la cuenta.
+• Su acceso es personal e intransferible.
+
+Gracias por confiar en nuestros servicios. 🙏
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
 export default function CustomersManagementPage() {
   const { alert, confirm } = useDialog();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Enviar credenciales y términos de la suscripción por WhatsApp
+  const handleSendSubscriptionWhatsApp = async (sub: any, cust: any) => {
+    const rawPhone = cust?.whatsapp || cust?.telefono || cust?.user?.phone || '';
+    const phone = rawPhone.replace(/\D/g, '');
+
+    if (!phone) {
+      await alert('El cliente no tiene un número de WhatsApp registrado para enviarle los accesos.', {
+        type: 'warning',
+        title: 'Sin WhatsApp',
+      });
+      return;
+    }
+
+    const platformName = sub.plan?.service?.nombre || sub.plataforma || 'Servicio Streaming';
+    const planName = sub.plan?.nombrePlan || sub.planNombre || '';
+    const email = sub.account?.emailCuenta || 'N/A';
+    const password = sub.account?.passwordCuenta || 'N/A';
+    const perfil = sub.account?.perfilAsignado;
+    const pin = sub.account?.pinPerfil;
+    const vencimiento = sub.fechaVencimiento ? new Date(sub.fechaVencimiento).toLocaleDateString('es-CO') : 'N/A';
+    const clientName = cust?.user?.nombre || cust?.nombre || 'Estimado Cliente';
+
+    const msg = [
+      `Hola *${clientName}* 👋, aquí tienes los detalles de acceso y credenciales de tu suscripción:`,
+      ``,
+      `🎬 *${platformName}* — ${planName}`,
+      ``,
+      `📧 *Correo:* ${email}`,
+      `🔑 *Contraseña:* ${password}`,
+      perfil ? `👤 *Perfil:* ${perfil}` : null,
+      pin ? `🔒 *PIN:* ${pin}` : null,
+      `📅 *Vencimiento:* ${vencimiento}`,
+      ``,
+      TERMS_MESSAGE,
+    ].filter(Boolean).join('\n');
+
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  };
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -1053,17 +1119,27 @@ export default function CustomersManagementPage() {
                               </div>
                             </div>
                           </div>
-                          <span
-                            className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                              sub.estado === 'ACTIVA'
-                                ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40'
-                                : sub.estado === 'EN_GARANTIA'
-                                ? 'bg-amber-950/60 text-amber-400 border border-amber-800/40'
-                                : 'bg-rose-950/60 text-rose-400 border border-rose-800/40'
-                            }`}
-                          >
-                            {sub.estado}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleSendSubscriptionWhatsApp(sub, viewingCustomer)}
+                              className="p-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-400 border border-emerald-800/80 transition-colors cursor-pointer"
+                              data-tooltip="Enviar accesos y términos por WhatsApp"
+                              title="Enviar accesos y términos por WhatsApp"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                            </button>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                sub.estado === 'ACTIVA'
+                                  ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40'
+                                  : sub.estado === 'EN_GARANTIA'
+                                  ? 'bg-amber-950/60 text-amber-400 border border-amber-800/40'
+                                  : 'bg-rose-950/60 text-rose-400 border border-rose-800/40'
+                              }`}
+                            >
+                              {sub.estado}
+                            </span>
+                          </div>
                         </div>
 
                         {/* Credenciales de la cuenta */}
@@ -1122,6 +1198,13 @@ export default function CustomersManagementPage() {
                                 )}
                               </div>
                             )}
+                            <button
+                              onClick={() => handleSendSubscriptionWhatsApp(sub, viewingCustomer)}
+                              className="w-full mt-2 py-1.5 px-3 bg-emerald-950/80 hover:bg-emerald-900/90 border border-emerald-800/80 text-emerald-300 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              <Phone className="w-3 h-3 text-emerald-400" />
+                              <span>Enviar Credenciales & Normas por WhatsApp</span>
+                            </button>
                           </div>
                         ) : (
                           <div className="text-[10px] text-gray-500 italic">Sin cuenta vinculada</div>

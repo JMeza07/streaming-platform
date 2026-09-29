@@ -205,12 +205,16 @@ export class WhatsappService {
 
   // OBTENER CONFIGURACIÓN DE WHATSAPP
   async getConfig() {
-    const config = await this.prisma.whatsappConfig.findFirst();
+    let config = await this.prisma.whatsappConfig.findFirst();
+    const systemSetting = await this.prisma.systemSetting.findUnique({ where: { id: 'singleton' } }).catch(() => null);
+
     if (!config) {
       // Crear configuración por defecto si no existe
-      return this.prisma.whatsappConfig.create({
+      config = await this.prisma.whatsappConfig.create({
         data: {
           nombreConfig: 'Principal',
+          nombreRemitente: systemSetting?.nombrePlataforma || 'StreamControl',
+          numeroWhatsapp: systemSetting?.whatsappSoporte || '+573001234567',
           zonaHoraria: 'America/Bogota',
           horaInicio: '09:00:00',
           horaFin: '20:00:00',
@@ -221,6 +225,15 @@ export class WhatsappService {
           plantillaRecuperacion3d: this.getDefaultRecoveryTemplate(),
         },
       });
+    } else if ((!config.numeroWhatsapp || !config.nombreRemitente) && systemSetting) {
+      // Si existen campos vacíos, sincronizar con systemSetting
+      config = await this.prisma.whatsappConfig.update({
+        where: { id: config.id },
+        data: {
+          nombreRemitente: config.nombreRemitente || systemSetting.nombrePlataforma || 'StreamControl',
+          numeroWhatsapp: config.numeroWhatsapp || systemSetting.whatsappSoporte || '+573001234567',
+        },
+      });
     }
     return config;
   }
@@ -228,10 +241,32 @@ export class WhatsappService {
   // ACTUALIZAR CONFIGURACIÓN
   async updateConfig(data: any) {
     const config = await this.getConfig();
-    return this.prisma.whatsappConfig.update({
+    const updated = await this.prisma.whatsappConfig.update({
       where: { id: config.id },
       data,
     });
+
+    // Sincronizar recíprocamente con SystemSetting si se actualizan nombre o número
+    if (data.numeroWhatsapp || data.nombreRemitente) {
+      try {
+        await this.prisma.systemSetting.upsert({
+          where: { id: 'singleton' },
+          update: {
+            ...(data.numeroWhatsapp ? { whatsappSoporte: data.numeroWhatsapp } : {}),
+            ...(data.nombreRemitente ? { nombrePlataforma: data.nombreRemitente } : {}),
+          },
+          create: {
+            id: 'singleton',
+            whatsappSoporte: data.numeroWhatsapp || '+573001234567',
+            nombrePlataforma: data.nombreRemitente || 'StreamControl',
+          },
+        });
+      } catch (err: any) {
+        this.logger.warn(`No se pudo sincronizar SystemSetting: ${err.message}`);
+      }
+    }
+
+    return updated;
   }
 
   // ACTIVAR/DESACTIVAR NOTIFICACIONES

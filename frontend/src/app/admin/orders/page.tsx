@@ -47,6 +47,32 @@ import {
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import { useDialog } from '@/components/Dialog';
 
+// Normas de Uso y Condiciones adjuntas a cada entrega de suscripción
+const TERMS_MESSAGE = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 NORMAS DE USO Y CONDICIONES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ PERMITIDO:
+• Usar el servicio de forma personal en el perfil/pantalla asignada.
+• Disfrutar el contenido dentro de los límites del plan adquirido.
+
+❌ PROHIBIDO (puede causar CANCELACIÓN inmediata sin reembolso):
+• Compartir las credenciales con terceros no autorizados.
+• Cambiar la contraseña, nombre del perfil o PIN sin autorización.
+• Agregar o eliminar perfiles de la cuenta.
+• Acceder desde más dispositivos de los permitidos simultáneamente.
+• Intentar hacer descargas masivas o uso comercial del servicio.
+• Ceder, vender o transferir el acceso a otra persona.
+
+⚠️ IMPORTANTE:
+• El incumplimiento de estas normas resultará en la SUSPENSIÓN o CANCELACIÓN inmediata de su cuenta SIN derecho a reembolso.
+• Si detecta problemas técnicos, comuníquese con soporte ANTES de hacer cualquier cambio en la cuenta.
+• Su acceso es personal e intransferible.
+
+Gracias por confiar en nuestros servicios. 🙏
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
 export default function OrdersPage() {
   const { alert } = useDialog();
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -60,6 +86,49 @@ export default function OrdersPage() {
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Enviar credenciales y términos de suscripción por WhatsApp
+  const handleSendSubscriptionWhatsApp = async (sub: any, order: any) => {
+    const acc = sub.account || sub.credenciales;
+    const customer = order?.customer || order?.cliente;
+    const rawPhone = customer?.whatsapp || customer?.telefono || customer?.user?.phone || '';
+    const phone = rawPhone.replace(/\D/g, '');
+
+    if (!phone) {
+      await alert('El cliente no tiene un número de WhatsApp registrado para enviarle los accesos.', {
+        type: 'warning',
+        title: 'Sin WhatsApp',
+      });
+      return;
+    }
+
+    const platformName = sub.plan?.service?.nombre || sub.plataforma || sub.servicio || 'Servicio Streaming';
+    const planName = sub.plan?.nombrePlan || sub.planNombre || sub.plan || '';
+    const email = acc?.emailCuenta || acc?.email || 'N/A';
+    const password = acc?.passwordCuenta || acc?.password || 'N/A';
+    const perfil = acc?.perfilAsignado || acc?.perfil;
+    const pin = acc?.pinPerfil || acc?.pin;
+    const vencimiento = sub.fechaVencimiento || sub.fechaFin;
+    const fechaVencFormatted = vencimiento ? new Date(vencimiento).toLocaleDateString('es-CO') : 'N/A';
+    const clientName = customer?.user?.nombre || customer?.nombre || 'Estimado Cliente';
+
+    const msg = [
+      `Hola *${clientName}* 👋, aquí tienes los detalles de acceso y credenciales de tu suscripción:`,
+      ``,
+      `🎬 *${platformName}* — ${planName}`,
+      ``,
+      `📧 *Correo:* ${email}`,
+      `🔑 *Contraseña:* ${password}`,
+      perfil ? `👤 *Perfil:* ${perfil}` : null,
+      pin ? `🔒 *PIN:* ${pin}` : null,
+      `📅 *Vencimiento:* ${fechaVencFormatted}`,
+      ``,
+      TERMS_MESSAGE,
+    ].filter(Boolean).join('\n');
+
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  };
 
   // Control de Verificación Obligatoria de Comprobante de Pago antes de Aprobar
   const [unverifiedWarningOrder, setUnverifiedWarningOrder] = useState<any | null>(null);
@@ -1246,6 +1315,14 @@ export default function OrdersPage() {
                                   <Copy className="w-3 h-3" />
                                 )}
                               </button>
+                              <button
+                                onClick={() => handleSendSubscriptionWhatsApp(sub, viewingOrder)}
+                                className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors"
+                                data-tooltip="Enviar accesos y normas por WhatsApp"
+                                title="Enviar accesos y normas por WhatsApp"
+                              >
+                                <Phone className="w-3.5 h-3.5" />
+                              </button>
                               <span className="font-bold text-white text-xs">
                                 {sub.plan?.service?.nombre} ({sub.plan?.nombrePlan})
                               </span>
@@ -1305,38 +1382,49 @@ export default function OrdersPage() {
                             })()}
                           </div>
 
-                          {/* Acciones Rápidas sobre la Cuenta de Inventario */}
-                          {acc?.id && (
-                            <div className="flex items-center gap-1.5 self-start sm:self-auto shrink-0">
-                              <span className="text-[10px] text-gray-400">Estado:</span>
-                              <select
-                                value={acc.estado || 'OCUPADA'}
-                                onChange={async (e) => {
-                                  const newStatus = e.target.value;
-                                  try {
-                                    setAccountActionLoading(acc.id);
-                                    await api.patch(`/accounts/${acc.id}`, { estado: newStatus });
-                                    acc.estado = newStatus;
-                                    setViewingOrder({ ...viewingOrder });
-                                    fetchOrders();
-                                  } catch (err: any) {
-                                    alert(err.response?.data?.message || 'Error al actualizar estado de la cuenta');
-                                  } finally {
-                                    setAccountActionLoading(null);
-                                  }
-                                }}
-                                disabled={accountActionLoading === acc.id}
-                                className="bg-gray-950 border border-gray-700 text-[11px] text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-red-600 cursor-pointer"
-                                title="Cambiar estado en inventario (Suspender/Bloquear/Defectuosa/Disponible)"
-                              >
-                                <option value="OCUPADA">Ocupada</option>
-                                <option value="BLOQUEADA">Bloquear</option>
-                                <option value="DEFECTUOSA">Defectuosa</option>
-                                <option value="DISPONIBLE">Disponible</option>
-                                <option value="VENCIDA">Vencida</option>
-                              </select>
-                            </div>
-                          )}
+                          {/* Acciones Rápidas sobre la Cuenta de Inventario & WhatsApp */}
+                          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 flex-wrap">
+                            <button
+                              onClick={() => handleSendSubscriptionWhatsApp(sub, viewingOrder)}
+                              data-tooltip="Enviar accesos completos y normas de uso por WhatsApp"
+                              className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-800/80 hover:border-emerald-700 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
+                            >
+                              <Phone className="w-3 h-3 text-emerald-400" />
+                              <span>Enviar WhatsApp</span>
+                            </button>
+
+                            {acc?.id && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-gray-400">Estado:</span>
+                                <select
+                                  value={acc.estado || 'OCUPADA'}
+                                  onChange={async (e) => {
+                                    const newStatus = e.target.value;
+                                    try {
+                                      setAccountActionLoading(acc.id);
+                                      await api.patch(`/accounts/${acc.id}`, { estado: newStatus });
+                                      acc.estado = newStatus;
+                                      setViewingOrder({ ...viewingOrder });
+                                      fetchOrders();
+                                    } catch (err: any) {
+                                      alert(err.response?.data?.message || 'Error al actualizar estado de la cuenta');
+                                    } finally {
+                                      setAccountActionLoading(null);
+                                    }
+                                  }}
+                                  disabled={accountActionLoading === acc.id}
+                                  className="bg-gray-950 border border-gray-700 text-[11px] text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-red-600 cursor-pointer"
+                                  title="Cambiar estado en inventario (Suspender/Bloquear/Defectuosa/Disponible)"
+                                >
+                                  <option value="OCUPADA">Ocupada</option>
+                                  <option value="BLOQUEADA">Bloquear</option>
+                                  <option value="DEFECTUOSA">Defectuosa</option>
+                                  <option value="DISPONIBLE">Disponible</option>
+                                  <option value="VENCIDA">Vencida</option>
+                                </select>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -2974,16 +3062,17 @@ export default function OrdersPage() {
               {saleSuccessData.cliente?.whatsapp && (
                 <a
                   href={`https://wa.me/${saleSuccessData.cliente.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                    `¡Hola ${saleSuccessData.cliente.nombre || ''}! Gracias por tu compra. Aquí tienes las credenciales de tu cuenta de streaming:\n` +
+                    `¡Hola ${saleSuccessData.cliente.nombre || ''}! Gracias por tu compra. Aquí tienes las credenciales de tu cuenta de streaming:\n\n` +
                       saleSuccessData.suscripciones
                         ?.map(
                           (s: any) =>
-                            `📺 ${s.servicio} (${s.plan})\n📧 Correo: ${s.emailCuenta}\n🔑 Contraseña: ${s.passwordCuenta}${
-                              s.perfilAsignado ? `\n👤 Perfil: ${s.perfilAsignado}` : ''
-                            }${s.pinPerfil ? `\n🔒 PIN: ${s.pinPerfil}` : ''}\n📅 Vence: ${new Date(s.fechaVencimiento).toLocaleDateString('es-CO')}`,
+                            `🎬 *${s.servicio}* (${s.plan})\n📧 *Correo:* ${s.emailCuenta}\n🔑 *Contraseña:* ${s.passwordCuenta}${
+                              s.perfilAsignado ? `\n👤 *Perfil:* ${s.perfilAsignado}` : ''
+                            }${s.pinPerfil ? `\n🔒 *PIN:* ${s.pinPerfil}` : ''}\n📅 *Vence:* ${new Date(s.fechaVencimiento).toLocaleDateString('es-CO')}`,
                         )
                         .join('\n\n') +
-                      `\n\n¡Que lo disfrutes! Si necesitas ayuda o garantía, contáctanos.`,
+                      `\n\n` +
+                      TERMS_MESSAGE,
                   )}`}
                   target="_blank"
                   rel="noreferrer"

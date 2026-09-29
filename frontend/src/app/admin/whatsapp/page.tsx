@@ -15,6 +15,9 @@ import {
   Sliders,
   Check,
   LogOut,
+  Phone,
+  User,
+  Smartphone,
 } from 'lucide-react';
 import { useDialog } from '@/components/Dialog';
 
@@ -269,7 +272,11 @@ export default function WhatsAppPage() {
                     ) : (
                       <p className="text-xs text-emerald-400 mt-1 font-medium">Instancia activa y vinculada</p>
                     )}
-                    <p className="text-[11px] text-gray-400 mt-2 max-w-[220px]">
+                    <div className="mt-2 pt-2 border-t border-gray-800/80 text-[11px] text-gray-400 space-y-0.5 text-left">
+                      <p>Remitente: <span className="text-white font-medium">{config?.nombreRemitente || 'StreamControl'}</span></p>
+                      <p>Oficial: <span className="text-white font-mono">{config?.numeroWhatsapp || 'No configurado'}</span></p>
+                    </div>
+                    <p className="text-[10px] text-gray-500 mt-2 max-w-[220px]">
                       Las órdenes pagadas y alertas de renovación se despachan automáticamente desde este número.
                     </p>
                   </div>
@@ -402,6 +409,70 @@ export default function WhatsAppPage() {
                 ) : null}
                 <span>{saveSuccess ? '¡Guardado!' : 'Guardar Cambios'}</span>
               </button>
+            </div>
+
+            {/* Identidad de la Línea y Número WhatsApp */}
+            <div className="p-4 bg-gray-950/70 border border-gray-800 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5 text-red-400">
+                  <Smartphone className="w-4 h-4 text-red-400" />
+                  <span>Identidad de la Línea & Número Oficial</span>
+                </span>
+                <span className="text-[10px] text-gray-500">
+                  Visible en soporte, notificaciones y CRM
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1 flex items-center gap-1">
+                    <User className="w-3.5 h-3.5 text-gray-400" />
+                    <span>Nombre del Remitente / Línea</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={config?.nombreRemitente || ''}
+                    onChange={(e) => setConfig({ ...config, nombreRemitente: e.target.value })}
+                    placeholder="Ej. StreamControl Soporte"
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-red-600 placeholder:text-gray-600"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Nombre comercial mostrado en plantillas y notificaciones automáticas.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1 flex items-center gap-1">
+                    <Phone className="w-3.5 h-3.5 text-gray-400" />
+                    <span>Número Oficial de WhatsApp</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={config?.numeroWhatsapp || ''}
+                    onChange={(e) => setConfig({ ...config, numeroWhatsapp: e.target.value })}
+                    placeholder="Ej. +573001234567"
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:ring-2 focus:ring-red-600 placeholder:text-gray-600"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Número al que los clientes escribirán para soporte y renovaciones.
+                  </p>
+                </div>
+              </div>
+
+              {/* Guía interactiva para cambiar el número vinculado */}
+              <div className="p-3 bg-red-950/20 border border-red-900/30 rounded-lg text-[11px] text-gray-300 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-semibold text-white">¿Cómo cambiar el número de WhatsApp vinculado?</span>
+                  <p className="text-gray-400 text-[10px] leading-relaxed">
+                    1. Escribe el nuevo teléfono en <strong className="text-white">Número Oficial</strong> y haz clic en <strong>Guardar Cambios</strong>.<br />
+                    2. En el panel lateral izquierdo, haz clic en <strong className="text-red-300">Desconectar</strong> para cerrar la sesión actual.<br />
+                    3. Pulsa <strong className="text-white">Generar / Refrescar QR</strong> y escanea el nuevo código con la aplicación de WhatsApp del nuevo número.
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Horarios */}

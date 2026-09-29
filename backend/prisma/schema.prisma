@@ -305,6 +305,8 @@ model SupportTicket {
 model WhatsappConfig {
   id                       String   @id @default(uuid())
   nombreConfig             String   @default("Principal") @map("nombre_config")
+  nombreRemitente          String?  @default("StreamControl") @map("nombre_remitente")
+  numeroWhatsapp           String?  @default("+573001234567") @map("numero_whatsapp")
   zonaHoraria              String   @default("America/Bogota") @map("zona_horaria")
   horaInicio               String   @default("09:00:00") @map("hora_inicio")
   horaFin                  String   @default("20:00:00") @map("hora_fin")

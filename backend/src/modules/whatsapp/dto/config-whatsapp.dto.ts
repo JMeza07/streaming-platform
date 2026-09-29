@@ -7,6 +7,14 @@ export class ConfigWhatsappDto {
 
   @IsOptional()
   @IsString()
+  nombreRemitente?: string;
+
+  @IsOptional()
+  @IsString()
+  numeroWhatsapp?: string;
+
+  @IsOptional()
+  @IsString()
   zonaHoraria?: string;
 
   @IsOptional()
