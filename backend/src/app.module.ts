@@ -19,10 +19,19 @@ import { UsersModule } from './modules/users/users.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Rate Limiting Global: 100 peticiones por minuto por IP
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     PrismaModule,
     VaultModule,
     AuditModule,
@@ -41,6 +50,12 @@ import { AuditModule } from './modules/audit/audit.module';
     UsersModule,
     SettingsModule,
     CustomersModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}
