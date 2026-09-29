@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
@@ -22,6 +22,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   // Si el token es válido, Passport inyecta esto en la petición (req.user)
   async validate(payload: any) {
+    if (payload.is2FAPending) {
+      throw new UnauthorizedException('Verificación 2FA pendiente. Debe validar el código de autenticación.');
+    }
+
     const [user, customer, affiliate] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: payload.sub },

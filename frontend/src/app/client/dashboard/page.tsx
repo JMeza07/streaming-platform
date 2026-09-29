@@ -37,6 +37,8 @@ import {
   Landmark,
   Image as ImageIcon,
   Ban,
+  Smartphone,
+  KeyRound,
 } from 'lucide-react';
 import TablePagination from '@/components/TablePagination';
 import { useDialog } from '@/components/Dialog';
@@ -156,6 +158,15 @@ export default function ClientDashboardPage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
 
+  // 2FA Google Authenticator (Opcional para Clientes)
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [show2FAModal, setShow2FAModal] = useState(false);
+  const [twoFactorSetupData, setTwoFactorSetupData] = useState<{ secret: string; qrCode: string } | null>(null);
+  const [twoFactorInputCode, setTwoFactorInputCode] = useState('');
+  const [twoFactorActionLoading, setTwoFactorActionLoading] = useState(false);
+  const [twoFactorActionError, setTwoFactorActionError] = useState('');
+  const [copied2FASecret, setCopied2FASecret] = useState(false);
+
   const fetchClientData = async () => {
     try {
       setLoading(true);
@@ -182,10 +193,78 @@ export default function ClientDashboardPage() {
         whatsapp: sumRes.data.whatsapp || '',
         pais: sumRes.data.pais || '',
       });
+
+      // Obtener estado 2FA del cliente
+      api.get('/auth/me').then((meRes) => {
+        if (meRes.data?.user?.twoFactorEnabled !== undefined) {
+          setTwoFactorEnabled(Boolean(meRes.data.user.twoFactorEnabled));
+        }
+      }).catch(() => {});
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpen2FAModal = async () => {
+    setTwoFactorActionError('');
+    setTwoFactorInputCode('');
+    setCopied2FASecret(false);
+
+    if (!twoFactorEnabled) {
+      setTwoFactorActionLoading(true);
+      setShow2FAModal(true);
+      try {
+        const res = await api.get('/auth/2fa/setup');
+        setTwoFactorSetupData(res.data);
+      } catch (err: any) {
+        setTwoFactorActionError(err.response?.data?.message || 'Error al generar código QR de 2FA');
+      } finally {
+        setTwoFactorActionLoading(false);
+      }
+    } else {
+      setTwoFactorSetupData(null);
+      setShow2FAModal(true);
+    }
+  };
+
+  const handleToggle2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (twoFactorInputCode.trim().length !== 6) return;
+
+    setTwoFactorActionLoading(true);
+    setTwoFactorActionError('');
+
+    try {
+      if (!twoFactorEnabled) {
+        await api.post('/auth/2fa/toggle', {
+          enable: true,
+          secret: twoFactorSetupData?.secret,
+          code: twoFactorInputCode.trim(),
+        });
+        setTwoFactorEnabled(true);
+        setShow2FAModal(false);
+        await alert('¡Google Authenticator ha sido activado exitosamente para tu cuenta de cliente!', {
+          type: 'success',
+          title: '2FA Activado',
+        });
+      } else {
+        await api.post('/auth/2fa/toggle', {
+          enable: false,
+          code: twoFactorInputCode.trim(),
+        });
+        setTwoFactorEnabled(false);
+        setShow2FAModal(false);
+        await alert('La autenticación en dos pasos ha sido desactivada.', {
+          type: 'info',
+          title: '2FA Desactivado',
+        });
+      }
+    } catch (err: any) {
+      setTwoFactorActionError(err.response?.data?.message || 'Código incorrecto. Verifica la aplicación Google Authenticator.');
+    } finally {
+      setTwoFactorActionLoading(false);
     }
   };
 
@@ -1446,6 +1525,45 @@ export default function ClientDashboardPage() {
               </button>
             </div>
           </form>
+
+          {/* ========================================================================= */}
+          {/* SECCIÓN: SEGURIDAD Y 2FA (OPCIONAL PARA CLIENTES)                        */}
+          {/* ========================================================================= */}
+          <div className="mt-8 pt-6 border-t border-gray-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <h4 className="text-sm font-bold text-white">Google Authenticator (2FA)</h4>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      twoFactorEnabled
+                        ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800'
+                        : 'bg-gray-800 text-gray-400'
+                    }`}
+                  >
+                    {twoFactorEnabled ? 'Activado (Protegido)' : 'Opcional (Desactivado)'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 leading-relaxed max-w-md">
+                  Añade una capa extra de seguridad a tu cuenta solicitando un código temporal de 6 dígitos cada vez que inicies sesión.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpen2FAModal}
+                className={`px-4 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-all shrink-0 flex items-center gap-2 ${
+                  twoFactorEnabled
+                    ? 'border border-gray-700 bg-gray-800 hover:bg-rose-950/40 hover:border-rose-800 hover:text-rose-300 text-gray-300'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/30'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>{twoFactorEnabled ? 'Desactivar 2FA' : 'Activar 2FA con Google'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -3526,6 +3644,149 @@ export default function ClientDashboardPage() {
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: ACTIVAR O DESACTIVAR 2FA GOOGLE AUTHENTICATOR (CLIENTES)           */}
+      {/* ========================================================================= */}
+      {show2FAModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="p-5 border-b border-gray-850 flex items-center justify-between bg-gray-950/60">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">
+                  {twoFactorEnabled ? 'Desactivar Autenticación en 2 Pasos' : 'Vincular Google Authenticator'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShow2FAModal(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleToggle2FA} className="p-6 space-y-4 text-xs">
+              {twoFactorActionError && (
+                <div className="p-3 bg-red-950/60 border border-red-800 text-red-200 rounded-xl flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <span>{twoFactorActionError}</span>
+                </div>
+              )}
+
+              {!twoFactorEnabled ? (
+                <>
+                  <p className="text-gray-300 leading-relaxed">
+                    1. Abre tu aplicación <strong className="text-white">Google Authenticator</strong> en tu celular y escanea el siguiente código QR:
+                  </p>
+
+                  <div className="flex flex-col items-center justify-center p-4 bg-gray-950 rounded-xl border border-gray-800">
+                    {twoFactorActionLoading && !twoFactorSetupData ? (
+                      <div className="w-44 h-44 flex flex-col items-center justify-center gap-2 text-gray-500">
+                        <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+                        <span>Generando clave segura...</span>
+                      </div>
+                    ) : twoFactorSetupData?.qrCode ? (
+                      <div className="p-2 bg-white rounded-xl shadow-md">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={twoFactorSetupData.qrCode}
+                          alt="QR Google Authenticator"
+                          className="w-44 h-44 object-contain"
+                        />
+                      </div>
+                    ) : null}
+
+                    {twoFactorSetupData?.secret && (
+                      <div className="w-full mt-3 pt-3 border-t border-gray-850">
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 mb-1">
+                          <span>O escribe esta clave secreta:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(twoFactorSetupData.secret);
+                              setCopied2FASecret(true);
+                              setTimeout(() => setCopied2FASecret(false), 2000);
+                            }}
+                            className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold cursor-pointer"
+                          >
+                            {copied2FASecret ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <span>{copied2FASecret ? 'Copiada' : 'Copiar clave'}</span>
+                          </button>
+                        </div>
+                        <code className="block bg-gray-900 border border-gray-800 rounded p-1.5 text-center font-mono text-[10px] text-gray-200 tracking-wider break-all select-all">
+                          {twoFactorSetupData.secret}
+                        </code>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-400 font-semibold mb-1">
+                      2. Ingresa el código de 6 dígitos que muestra tu app para confirmar:
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={twoFactorInputCode}
+                      onChange={(e) => setTwoFactorInputCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="000000"
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-2.5 text-center text-lg font-mono tracking-[0.3em] text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl text-amber-200 text-xs">
+                    ¿Estás seguro de que deseas desactivar la autenticación en dos pasos? Tu cuenta solo estará protegida por contraseña.
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-400 font-semibold mb-1">
+                      Ingresa el código actual de Google Authenticator para confirmar la desactivación:
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={twoFactorInputCode}
+                      onChange={(e) => setTwoFactorInputCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="000000"
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-2.5 text-center text-lg font-mono tracking-[0.3em] text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                      required
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShow2FAModal(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-800 hover:bg-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={twoFactorActionLoading || twoFactorInputCode.length !== 6}
+                  className={`px-5 py-2 rounded-xl text-white font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all ${
+                    twoFactorEnabled
+                      ? 'bg-rose-600 hover:bg-rose-500 shadow-lg shadow-rose-950/40'
+                      : 'bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-950/40'
+                  }`}
+                >
+                  {twoFactorActionLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{twoFactorEnabled ? 'Desactivar Seguridad' : 'Activar 2FA'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

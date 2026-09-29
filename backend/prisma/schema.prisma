@@ -25,6 +25,8 @@ model User {
   rol           UserRole  @default(CLIENTE)
   activo        Boolean   @default(true)
   modulosPermitidos String[] @default([]) @map("modulos_permitidos")
+  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
+  twoFactorSecret  String?   @map("two_factor_secret")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
   
