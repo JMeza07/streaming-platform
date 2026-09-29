@@ -49,6 +49,9 @@ interface RenewalOrder {
   estado: 'PENDIENTE' | 'PAGADO' | 'CANCELADO' | 'FALLIDO';
   metodoPago: string;
   comprobanteUrl?: string | null;
+  comprobanteVerificado?: boolean;
+  comprobanteVerificadoAt?: string | null;
+  comprobanteVerificadoPor?: string | null;
   descripcionVenta?: string | null;
   vendedorNombre?: string | null;
   vendedorComision?: number | null;
@@ -215,9 +218,49 @@ export default function RenewalsPage() {
     return { totalCount, pendingCount, approvedCount, totalRevenue };
   }, [renewals]);
 
+  // Manejo de Inspección y Verificación de Comprobante
+  const handleInspectAndVerify = async (order: RenewalOrder) => {
+    if (!order) return;
+    if (order.comprobanteUrl) {
+      setZoomedImage(order.comprobanteUrl);
+    }
+    if (!order.comprobanteVerificado && !verifiedReceiptOrders[order.id]) {
+      try {
+        await api.patch(`/orders/${order.id}/verify-receipt`);
+        setVerifiedReceiptOrders((prev) => ({ ...prev, [order.id]: true }));
+        setRenewals((prev) =>
+          prev.map((o) =>
+            o.id === order.id
+              ? {
+                  ...o,
+                  comprobanteVerificado: true,
+                  comprobanteVerificadoAt: new Date().toISOString(),
+                  comprobanteVerificadoPor: 'Personal Autorizado',
+                }
+              : o
+          )
+        );
+        if (viewingDetailOrder && viewingDetailOrder.id === order.id) {
+          setViewingDetailOrder((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  comprobanteVerificado: true,
+                  comprobanteVerificadoAt: new Date().toISOString(),
+                  comprobanteVerificadoPor: 'Personal Autorizado',
+                }
+              : null
+          );
+        }
+      } catch (err) {
+        console.error('Error al marcar comprobante de renovación como verificado:', err);
+      }
+    }
+  };
+
   // Manejo de Aprobación
   const initiateApprove = (order: RenewalOrder) => {
-    if (order.comprobanteUrl && !verifiedReceiptOrders[order.id]) {
+    if (order.comprobanteUrl && !order.comprobanteVerificado && !verifiedReceiptOrders[order.id]) {
       setUnverifiedWarningOrder(order);
       return;
     }
@@ -499,7 +542,7 @@ export default function RenewalsPage() {
                   const isPending = order.estado === 'PENDIENTE';
                   const isPaid = order.estado === 'PAGADO';
                   const isCancelled = order.estado === 'CANCELADO';
-                  const isReceiptVerified = Boolean(verifiedReceiptOrders[order.id]);
+                  const isReceiptVerified = Boolean(order.comprobanteVerificado || verifiedReceiptOrders[order.id]);
 
                   return (
                     <tr
@@ -599,8 +642,7 @@ export default function RenewalsPage() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setVerifiedReceiptOrders((prev) => ({ ...prev, [order.id]: true }));
-                                setZoomedImage(order.comprobanteUrl || null);
+                                handleInspectAndVerify(order);
                               }}
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border cursor-pointer transition-colors ${
                                 isReceiptVerified
@@ -609,14 +651,14 @@ export default function RenewalsPage() {
                               }`}
                               title={
                                 isReceiptVerified
-                                  ? 'Comprobante revisado (clic para ver de nuevo)'
-                                  : 'Comprobante adjunto por verificar (clic para revisar)'
+                                  ? 'Comprobante verificado (clic para ver de nuevo)'
+                                  : 'Comprobante adjunto por verificar (clic para revisar y verificar)'
                               }
                             >
                               {isReceiptVerified ? (
                                 <>
                                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                  <span>Soporte Verificado</span>
+                                  <span>Comprobante verificado</span>
                                 </>
                               ) : (
                                 <>
@@ -761,9 +803,8 @@ export default function RenewalsPage() {
                 onClick={() => {
                   const target = unverifiedWarningOrder;
                   setUnverifiedWarningOrder(null);
-                  if (target.comprobanteUrl) {
-                    setVerifiedReceiptOrders((prev) => ({ ...prev, [target.id]: true }));
-                    setZoomedImage(target.comprobanteUrl);
+                  if (target) {
+                    handleInspectAndVerify(target);
                   }
                 }}
                 className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 shadow-lg shadow-amber-950/50 flex items-center gap-1.5 cursor-pointer"
@@ -1019,16 +1060,51 @@ export default function RenewalsPage() {
               {/* Comprobante */}
               {viewingDetailOrder.comprobanteUrl && (
                 <div className="bg-gray-950/70 border border-gray-800 rounded-2xl p-4 space-y-2">
-                  <h4 className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider">Comprobante de Pago Adjunto</h4>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider">Comprobante de Pago Adjunto</h4>
+                    {(viewingDetailOrder.comprobanteVerificado || verifiedReceiptOrders[viewingDetailOrder.id]) ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800/50">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Comprobante verificado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800/50">
+                        <AlertTriangle className="w-3 h-3 animate-pulse" />
+                        Soporte por Revisar
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    {(viewingDetailOrder.comprobanteVerificado || verifiedReceiptOrders[viewingDetailOrder.id]) ? (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 inline" />
+                        Comprobante verificado. En modo de solo lectura (no permite adjuntar nuevo soporte).
+                      </span>
+                    ) : (
+                      <span className="text-amber-400/90 font-medium">
+                        ⚠️ Inspecciona el comprobante antes de autorizar la renovación.
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-3 pt-1">
                     <button
                       type="button"
-                      onClick={() => setZoomedImage(viewingDetailOrder.comprobanteUrl || null)}
+                      onClick={() => handleInspectAndVerify(viewingDetailOrder)}
                       className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-2 cursor-pointer shadow-md transition-all"
                     >
                       <Eye className="w-3.5 h-3.5" />
-                      <span>Ver Comprobante en Grande</span>
+                      <span>Ver Comprobante (Inspeccionar)</span>
                     </button>
+                    {!viewingDetailOrder.comprobanteVerificado && !verifiedReceiptOrders[viewingDetailOrder.id] && (
+                      <button
+                        type="button"
+                        onClick={() => handleInspectAndVerify(viewingDetailOrder)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/70 text-emerald-300 font-semibold text-xs flex items-center gap-2 cursor-pointer transition-all"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Verificar Comprobante</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

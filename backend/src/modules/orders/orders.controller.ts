@@ -54,6 +54,17 @@ export class OrdersController {
     return this.ordersService.attachReceipt(id, body.comprobanteUrl, user);
   }
 
+  // VERIFICAR COMPROBANTE DE PAGO (Admin, Vendedor, Soporte)
+  @Patch(':id/verify-receipt')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.VENDEDOR, UserRole.SOPORTE)
+  verifyReceipt(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService.verifyReceipt(id, user);
+  }
+
   // REEMBOLSAR ORDEN (Solo Admin)
   @Post(':id/refund')
   @UseGuards(RolesGuard)

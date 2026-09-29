@@ -553,7 +553,12 @@ export class OrdersService {
         where: { id: orderId },
         data: {
           estado: OrderStatus.PAGADO,
-          ...(finalComprobante && { comprobanteUrl: finalComprobante }),
+          ...(finalComprobante && {
+            comprobanteUrl: finalComprobante,
+            comprobanteVerificado: true,
+            comprobanteVerificadoAt: new Date(),
+            comprobanteVerificadoPor: currentUser?.nombre || currentUser?.email || 'Sistema',
+          }),
           ...(sellerUser && {
             vendedorId: sellerUser.id,
             vendedorNombre: sellerUser.nombre,
@@ -699,6 +704,13 @@ export class OrdersService {
       throw new BadRequestException('Esta orden ha sido cancelada. No se pueden realizar más acciones ni adjuntar comprobantes.');
     }
 
+    // Si el comprobante ya fue verificado por el personal, NO se permite adjuntar uno nuevo (Modo sólo lectura)
+    if (order.comprobanteVerificado) {
+      throw new ForbiddenException(
+        'El comprobante de pago de esta orden ya ha sido verificado. No se permite adjuntar un nuevo comprobante ni modificar el existente (modo de solo lectura).',
+      );
+    }
+
     if (currentUser && currentUser.rol === UserRole.CLIENTE) {
       const isOwner =
         (currentUser.customerId && order.customerId === currentUser.customerId) ||
@@ -714,6 +726,9 @@ export class OrdersService {
       select: {
         id: true,
         comprobanteUrl: true,
+        comprobanteVerificado: true,
+        comprobanteVerificadoAt: true,
+        comprobanteVerificadoPor: true,
         estado: true,
         metodoPago: true,
         total: true,
@@ -744,6 +759,65 @@ export class OrdersService {
 
     return {
       message: 'Comprobante de pago adjuntado exitosamente. La orden queda pendiente de verificación.',
+      order: updated,
+    };
+  }
+
+  // VERIFICAR COMPROBANTE DE PAGO EN ÓRDENES Y VENTAS (ADMIN, VENDEDOR, SOPORTE)
+  async verifyReceipt(orderId: string, currentUser: any) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        customer: { include: { user: true } },
+        items: { include: { plan: { include: { service: true } } } },
+      },
+    });
+
+    if (!order) throw new NotFoundException('Orden no encontrada');
+
+    if (!order.comprobanteUrl) {
+      throw new BadRequestException('Esta orden no posee un comprobante de pago adjunto para verificar.');
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        comprobanteVerificado: true,
+        comprobanteVerificadoAt: new Date(),
+        comprobanteVerificadoPor: currentUser?.nombre || currentUser?.email || 'Personal Autorizado',
+      },
+      include: {
+        customer: { include: { user: true } },
+        items: { include: { plan: { include: { service: true } } } },
+        subscriptions: { include: { account: true } },
+        vendedor: true,
+      },
+    });
+
+    try {
+      await this.auditService.registrarEvento({
+        accion: 'VERIFICACION_COMPROBANTE',
+        modulo: AuditCategory.VENTAS,
+        severidad: AuditSeverity.SUCCESS,
+        descripcion: `Comprobante de pago verificado para la orden [#ORD-${order.id.substring(0, 8).toUpperCase()}] por ${currentUser?.nombre || currentUser?.email} (${currentUser?.rol}). El comprobante queda bloqueado en solo lectura.`,
+        entidadTipo: 'Order',
+        entidadId: `#ORD-${order.id.substring(0, 8).toUpperCase()}`,
+        usuarioId: currentUser?.userId || currentUser?.id,
+        usuarioNombre: currentUser?.nombre,
+        usuarioEmail: currentUser?.email,
+        usuarioRol: currentUser?.rol,
+        detalles: {
+          orderId: order.id,
+          comprobanteUrl: order.comprobanteUrl,
+          verificadoPor: currentUser?.nombre || currentUser?.email,
+        },
+      });
+    } catch (auditErr) {
+      console.error('Error registrando auditoría de verificación:', auditErr);
+    }
+
+    return {
+      message: 'Comprobante verificado con éxito. Ha quedado establecido como comprobante verificado en solo lectura.',
       order: updated,
     };
   }
@@ -1244,7 +1318,12 @@ export class OrdersService {
         where: { id: orderId },
         data: {
           estado: OrderStatus.PAGADO,
-          ...(finalComprobante && { comprobanteUrl: finalComprobante }),
+          ...(finalComprobante && {
+            comprobanteUrl: finalComprobante,
+            comprobanteVerificado: true,
+            comprobanteVerificadoAt: new Date(),
+            comprobanteVerificadoPor: currentUser?.nombre || currentUser?.email || 'Sistema',
+          }),
           descripcionVenta: descRenovacion,
         },
       });

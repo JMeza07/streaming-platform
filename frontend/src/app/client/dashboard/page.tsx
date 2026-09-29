@@ -320,6 +320,13 @@ export default function ClientDashboardPage() {
   };
 
   const handleSaveViewingReceipt = async (orderId: string) => {
+    if (viewingOrder?.comprobanteVerificado) {
+      await alert('El comprobante de pago de esta orden ya ha sido verificado. No se permite adjuntar un nuevo comprobante ni modificar el existente (modo de solo lectura).', {
+        type: 'warning',
+        title: 'Comprobante Verificado',
+      });
+      return;
+    }
     if (!viewingReceiptPreview) {
       await alert('Por favor selecciona la imagen de tu comprobante de pago primero.', { type: 'warning', title: 'Comprobante requerido' });
       return;
@@ -1336,6 +1343,12 @@ export default function ClientDashboardPage() {
                           >
                             {o.estado}
                           </span>
+                          {o.comprobanteVerificado && (
+                            <span className="flex items-center gap-1 mt-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-2 py-0.5 rounded-md w-fit">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span>Comprobante verificado</span>
+                            </span>
+                          )}
                         </td>
 
                         {/* DETALLE Y SOPORTE */}
@@ -2956,9 +2969,14 @@ export default function ClientDashboardPage() {
                       <span>Comprobante de Pago de esta Orden</span>
                     </span>
 
-                    {viewingOrder.comprobanteUrl ? (
+                    {viewingOrder.comprobanteVerificado ? (
                       <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800/70 text-emerald-300 font-semibold flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>Comprobante verificado</span>
+                      </span>
+                    ) : viewingOrder.comprobanteUrl ? (
+                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-blue-950/70 border border-blue-800/70 text-blue-300 font-semibold flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-blue-400" />
                         <span>Soporte Registrado</span>
                       </span>
                     ) : (
@@ -3004,14 +3022,26 @@ export default function ClientDashboardPage() {
                         </div>
                         <div className="space-y-0.5">
                           <p className="text-white font-semibold text-xs flex items-center gap-1.5">
-                            <span>Comprobante digital registrado en el sistema</span>
+                            {viewingOrder.comprobanteVerificado ? (
+                              <span className="text-emerald-400">✓ Comprobante verificado por el equipo de soporte</span>
+                            ) : (
+                              <span>Comprobante digital registrado en el sistema</span>
+                            )}
                           </p>
                           <p className="text-[11px] text-gray-400">
-                            Soporte de pago enlazado exclusivamente a la orden #ORD-{viewingOrder.id.substring(0, 8).toUpperCase()}.
+                            {viewingOrder.comprobanteVerificado
+                              ? 'El pago fue validado exitosamente. Este archivo se encuentra bloqueado en modo de solo lectura y no puede ser alterado ni reemplazado.'
+                              : `Soporte de pago enlazado exclusivamente a la orden #ORD-${viewingOrder.id.substring(0, 8).toUpperCase()}.`}
                           </p>
-                          <span className="text-[10px] text-emerald-400 font-mono block">
-                            ✓ Guardado en base de datos
-                          </span>
+                          {viewingOrder.comprobanteVerificado ? (
+                            <span className="text-[10px] text-emerald-400 font-mono block">
+                              🔒 Modo Solo Lectura (Verificado)
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-400 font-mono block">
+                              ✓ Guardado en base de datos
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -3025,26 +3055,29 @@ export default function ClientDashboardPage() {
                           <span>Ver Soporte</span>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsEditingViewingReceipt(true);
-                            setViewingReceiptFile(null);
-                            setViewingReceiptPreview(null);
-                            setViewingReceiptErrorMsg('');
-                            setViewingReceiptSuccessMsg('');
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Cambiar Comprobante</span>
-                        </button>
+                        {/* Si el comprobante ya fue verificado, NO se permite cambiarlo; es estrictamente view-only */}
+                        {!viewingOrder.comprobanteVerificado && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingViewingReceipt(true);
+                              setViewingReceiptFile(null);
+                              setViewingReceiptPreview(null);
+                              setViewingReceiptErrorMsg('');
+                              setViewingReceiptSuccessMsg('');
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Cambiar Comprobante</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* CASO B: No tiene comprobante O el usuario activó la edición para subir/reemplazar */}
-                  {(!viewingOrder.comprobanteUrl || isEditingViewingReceipt) && (
+                  {/* CASO B: No tiene comprobante O el usuario activó la edición para subir/reemplazar (SOLO si no está verificado) */}
+                  {(!viewingOrder.comprobanteUrl || isEditingViewingReceipt) && !viewingOrder.comprobanteVerificado && (
                     <div className="space-y-2.5">
                       <input
                         type="file"

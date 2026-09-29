@@ -311,6 +311,45 @@ export default function OrdersPage() {
     }
   };
 
+  const handleInspectAndVerify = async (order: any) => {
+    if (!order) return;
+    if (order.comprobanteUrl) {
+      setZoomedImage(order.comprobanteUrl);
+    }
+    if (!order.comprobanteVerificado && !verifiedReceiptOrders[order.id]) {
+      try {
+        await api.patch(`/orders/${order.id}/verify-receipt`);
+        setVerifiedReceiptOrders((prev) => ({ ...prev, [order.id]: true }));
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === order.id
+              ? {
+                  ...o,
+                  comprobanteVerificado: true,
+                  comprobanteVerificadoAt: new Date().toISOString(),
+                  comprobanteVerificadoPor: currentUser?.nombre || currentUser?.email || 'Personal Autorizado',
+                }
+              : o
+          )
+        );
+        if (viewingOrder && viewingOrder.id === order.id) {
+          setViewingOrder((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  comprobanteVerificado: true,
+                  comprobanteVerificadoAt: new Date().toISOString(),
+                  comprobanteVerificadoPor: currentUser?.nombre || currentUser?.email || 'Personal Autorizado',
+                }
+              : null
+          );
+        }
+      } catch (err) {
+        console.error('Error al marcar comprobante como verificado:', err);
+      }
+    }
+  };
+
   const openCancelSaleModal = (order: any) => {
     setCancellingOrder(order);
     setCancelReason('Solicitud de cancelación por el cliente');
@@ -780,24 +819,23 @@ export default function OrdersPage() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setVerifiedReceiptOrders((prev) => ({ ...prev, [order.id]: true }));
-                                setZoomedImage(order.comprobanteUrl);
+                                handleInspectAndVerify(order);
                               }}
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border cursor-pointer transition-colors mt-1 ${
-                                verifiedReceiptOrders[order.id]
+                                (order.comprobanteVerificado || verifiedReceiptOrders[order.id])
                                     ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60 hover:bg-emerald-900/50'
                                     : 'bg-amber-950/70 text-amber-300 border-amber-800/80 hover:bg-amber-900/60'
                               }`}
                               title={
-                                verifiedReceiptOrders[order.id]
-                                  ? 'Comprobante revisado (clic para ver de nuevo)'
-                                  : 'Comprobante adjunto por verificar (clic para revisar)'
+                                (order.comprobanteVerificado || verifiedReceiptOrders[order.id])
+                                  ? 'Comprobante verificado (clic para ver de nuevo)'
+                                  : 'Comprobante adjunto por verificar (clic para revisar y verificar)'
                               }
                             >
-                              {verifiedReceiptOrders[order.id] ? (
+                              {(order.comprobanteVerificado || verifiedReceiptOrders[order.id]) ? (
                                 <>
                                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                  <span>Soporte Verificado</span>
+                                  <span>Comprobante verificado</span>
                                 </>
                               ) : (
                                 <>
@@ -865,7 +903,7 @@ export default function OrdersPage() {
 
                                 // Condicionar la aprobación: si la orden cuenta con una imagen,
                                 // el sistema no permite aprobar sin antes haber verificado el comprobante
-                                if (order.comprobanteUrl && !verifiedReceiptOrders[order.id]) {
+                                if (order.comprobanteUrl && !order.comprobanteVerificado && !verifiedReceiptOrders[order.id]) {
                                   setUnverifiedWarningOrder(order);
                                   return;
                                 }
@@ -1320,10 +1358,15 @@ export default function OrdersPage() {
                       <CheckCircle2 className="w-3 h-3" />
                       Pago en Efectivo (Sin soporte digital)
                     </span>
-                  ) : currentReceipt ? (
+                  ) : (viewingOrder.comprobanteVerificado || verifiedReceiptOrders[viewingOrder.id]) ? (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800/50">
-                      <FileCheck className="w-3 h-3" />
-                      Comprobante Adjunto
+                      <CheckCircle2 className="w-3 h-3" />
+                      Comprobante verificado
+                    </span>
+                  ) : currentReceipt ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800/50">
+                      <AlertTriangle className="w-3 h-3 animate-pulse" />
+                      Soporte por Revisar
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800/50">
@@ -1336,10 +1379,7 @@ export default function OrdersPage() {
                 {currentReceipt ? (
                   <div className="flex flex-col sm:flex-row items-center gap-3 bg-gray-900/80 p-3 rounded-xl border border-gray-800">
                     <div
-                      onClick={() => {
-                        setVerifiedReceiptOrders((prev) => ({ ...prev, [viewingOrder.id]: true }));
-                        setZoomedImage(currentReceipt);
-                      }}
+                      onClick={() => handleInspectAndVerify(viewingOrder)}
                       className="relative group cursor-pointer w-24 h-24 sm:w-28 sm:h-28 rounded-lg overflow-hidden border border-gray-700 flex-shrink-0 bg-black"
                       data-tooltip="Ver"
                     >
@@ -1358,17 +1398,26 @@ export default function OrdersPage() {
                         Comprobante de pago adjunto por el cliente
                       </p>
                       <p className="text-[11px] text-gray-400">
-                        {verifiedReceiptOrders[viewingOrder.id]
-                          ? '✅ Has verificado este comprobante en la sesión actual.'
-                          : '⚠️ Debes inspeccionar la imagen antes de poder aprobar la orden.'}
+                        {(viewingOrder.comprobanteVerificado || verifiedReceiptOrders[viewingOrder.id]) ? (
+                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 inline" />
+                            Comprobante verificado. En modo de solo lectura (no permite adjuntar nuevo soporte).
+                            {viewingOrder.comprobanteVerificadoPor && (
+                              <span className="text-gray-400 font-normal">
+                                {' '}(Verificado por: {viewingOrder.comprobanteVerificadoPor})
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-amber-400/90 font-medium">
+                            ⚠️ Debes inspeccionar y verificar el comprobante antes de aprobar la orden.
+                          </span>
+                        )}
                       </p>
                       <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
                         <button
                           type="button"
-                          onClick={() => {
-                            setVerifiedReceiptOrders((prev) => ({ ...prev, [viewingOrder.id]: true }));
-                            setZoomedImage(currentReceipt);
-                          }}
+                          onClick={() => handleInspectAndVerify(viewingOrder)}
                           data-tooltip="Ver"
                           className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                         >
@@ -1376,7 +1425,20 @@ export default function OrdersPage() {
                           <span>Ver Completo (Inspeccionar)</span>
                         </button>
 
-                        {viewingOrder.estado === 'PENDIENTE' && (
+                        {/* Si aún NO ha sido verificado, botón para marcar como verificado */}
+                        {!viewingOrder.comprobanteVerificado && !verifiedReceiptOrders[viewingOrder.id] && (
+                          <button
+                            type="button"
+                            onClick={() => handleInspectAndVerify(viewingOrder)}
+                            className="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/70 text-emerald-300 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Verificar Comprobante</span>
+                          </button>
+                        )}
+
+                        {/* SOLO si NO ha sido verificado y está PENDIENTE se permite cambiar imagen. Una vez verificado, es estrictamente view-only */}
+                        {!viewingOrder.comprobanteVerificado && !verifiedReceiptOrders[viewingOrder.id] && viewingOrder.estado === 'PENDIENTE' && (
                           <label
                             data-tooltip="Editar"
                             className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -1599,10 +1661,7 @@ export default function OrdersPage() {
                 Imagen del comprobante adjuntada por el cliente:
               </span>
               <div
-                onClick={() => {
-                  setVerifiedReceiptOrders((prev) => ({ ...prev, [unverifiedWarningOrder.id]: true }));
-                  setZoomedImage(unverifiedWarningOrder.comprobanteUrl);
-                }}
+                onClick={() => handleInspectAndVerify(unverifiedWarningOrder)}
                 className="relative group cursor-pointer w-full h-44 rounded-xl overflow-hidden border-2 border-dashed border-amber-800/70 hover:border-amber-400 bg-black/70 flex items-center justify-center transition-all shadow-inner"
                 title="Haz clic para inspeccionar en pantalla completa"
               >
@@ -1617,7 +1676,7 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              {verifiedReceiptOrders[unverifiedWarningOrder.id] ? (
+              {(unverifiedWarningOrder.comprobanteVerificado || verifiedReceiptOrders[unverifiedWarningOrder.id]) ? (
                 <div className="p-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span className="font-semibold">
@@ -1642,13 +1701,10 @@ export default function OrdersPage() {
               Cancelar / Cerrar
             </button>
 
-            {!verifiedReceiptOrders[unverifiedWarningOrder.id] ? (
+            {(!unverifiedWarningOrder.comprobanteVerificado && !verifiedReceiptOrders[unverifiedWarningOrder.id]) ? (
               <button
                 type="button"
-                onClick={() => {
-                  setVerifiedReceiptOrders((prev) => ({ ...prev, [unverifiedWarningOrder.id]: true }));
-                  setZoomedImage(unverifiedWarningOrder.comprobanteUrl);
-                }}
+                onClick={() => handleInspectAndVerify(unverifiedWarningOrder)}
                 className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-amber-950/60 flex items-center justify-center gap-2 cursor-pointer transition-all animate-pulse"
               >
                 <ZoomIn className="w-4 h-4" />
