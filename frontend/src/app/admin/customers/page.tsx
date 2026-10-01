@@ -88,6 +88,8 @@ export default function CustomersManagementPage() {
 
     const platformName = sub.plan?.service?.nombre || sub.plataforma || 'Servicio Streaming';
     const planName = sub.plan?.nombrePlan || sub.planNombre || '';
+    const accId = sub.account?.id || sub.accountId || '';
+    const accCode = accId ? `#ACC-${accId.substring(0, 8).toUpperCase()}` : '';
     const email = sub.account?.emailCuenta || 'N/A';
     const password = sub.account?.passwordCuenta || 'N/A';
     const perfil = sub.account?.perfilAsignado;
@@ -99,6 +101,7 @@ export default function CustomersManagementPage() {
       `Hola *${clientName}* 👋, aquí tienes los detalles de acceso y credenciales de tu suscripción:`,
       ``,
       `🎬 *${platformName}* — ${planName}`,
+      accCode ? `🆔 *ID Cuenta:* ${accCode} (${accId})` : null,
       ``,
       `📧 *Correo:* ${email}`,
       `🔑 *Contraseña:* ${password}`,
@@ -214,7 +217,16 @@ export default function CustomersManagementPage() {
         c.nombre?.toLowerCase().includes(term) ||
         c.email?.toLowerCase().includes(term) ||
         phoneVal.includes(term) ||
-        c.pais?.toLowerCase().includes(term);
+        c.pais?.toLowerCase().includes(term) ||
+        c.cuentas?.some((acc: any) =>
+          acc.id?.toLowerCase().includes(term) ||
+          acc.codigo?.toLowerCase().includes(term) ||
+          acc.emailCuenta?.toLowerCase().includes(term)
+        ) ||
+        c.plataformas?.some((p: any) =>
+          p.accountCodes?.some((cd: string) => cd.toLowerCase().includes(term)) ||
+          p.accountIds?.some((id: string) => id.toLowerCase().includes(term))
+        );
 
       const matchesStatus =
         !statusFilter ||
@@ -414,6 +426,14 @@ export default function CustomersManagementPage() {
             : 'Ninguna',
       },
       {
+        key: 'cuentas',
+        label: 'IDs de Cuentas Adquiridas',
+        format: (_, r) =>
+          r.cuentas && r.cuentas.length > 0
+            ? r.cuentas.map((a: any) => `${a.servicio}: ${a.codigo || a.id} (${a.id})`).join('; ')
+            : 'Sin cuentas asignadas',
+      },
+      {
         key: 'totalGastado',
         label: 'Total Gastado (COP)',
         format: (v) => `$${Number(v || 0).toLocaleString('es-CO')}`,
@@ -466,14 +486,18 @@ export default function CustomersManagementPage() {
         { key: 'pais', label: 'País', format: (p) => p || 'Colombia' },
         {
           key: 'plataformas',
-          label: 'Plataformas',
-          format: (p) =>
-            p && p.length > 0
-              ? p
-                  .map((item: any) => (typeof item === 'string' ? item : item?.nombre))
-                  .filter(Boolean)
-                  .join(', ')
-              : 'Sin compras',
+          label: 'Plataformas & IDs Cuenta',
+          format: (p, r) => {
+            const platList =
+              p && p.length > 0
+                ? p.map((item: any) => (typeof item === 'string' ? item : item?.nombre)).filter(Boolean).join(', ')
+                : 'Sin compras';
+            const accList =
+              r.cuentas && r.cuentas.length > 0
+                ? r.cuentas.map((a: any) => `${a.codigo || a.id}`).join(', ')
+                : '';
+            return accList ? `${platList} [${accList}]` : platList;
+          },
         },
         {
           key: 'totalGastado',
@@ -719,6 +743,8 @@ export default function CustomersManagementPage() {
               <tr className="border-b border-gray-850 bg-gray-900/60 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                 <th className="py-2.5 px-3 rounded-tl-2xl">Cliente</th>
                 <th className="py-2.5 px-2">Contacto & WhatsApp</th>
+                <th className="py-2.5 px-2">Billetera</th>
+                <th className="py-2.5 px-2 text-center">Strikes</th>
                 <th className="py-2.5 px-2">Ubicación</th>
                 <th className="py-2.5 px-2">Plataformas</th>
                 <th className="py-2.5 px-2">Gasto Total</th>
@@ -728,17 +754,17 @@ export default function CustomersManagementPage() {
                 <th className="py-2.5 px-3 text-right rounded-tr-2xl">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-850/60 text-xs">
+            <tbody className="divide-y divide-gray-855/60 text-xs">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500">
+                  <td colSpan={11} className="py-12 text-center text-gray-500">
                     <Loader2 className="w-6 h-6 animate-spin text-red-500 mx-auto" />
                     <span className="block mt-2">Cargando directorio de clientes...</span>
                   </td>
                 </tr>
               ) : filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500">
+                  <td colSpan={11} className="py-12 text-center text-gray-500">
                     No se encontraron clientes con los filtros especificados.
                   </td>
                 </tr>
@@ -812,6 +838,31 @@ export default function CustomersManagementPage() {
                           </div>
                         ) : (
                           <span className="text-gray-500 italic text-[10px]">Sin teléfono</span>
+                        )}
+                      </td>
+
+                      {/* Billetera / Saldo a Favor (Escenario 1) */}
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        <span className={`inline-flex items-center gap-1 font-semibold text-xs ${
+                          Number(cust.walletBalance || 0) > 0 ? 'text-emerald-400 font-bold' : 'text-gray-400'
+                        }`}>
+                          <DollarSign className="w-3 h-3 text-emerald-500" />
+                          <span>${Number(cust.walletBalance || 0).toLocaleString('es-CO')}</span>
+                        </span>
+                      </td>
+
+                      {/* Infracciones / Strikes (Escenario 3) */}
+                      <td className="py-2 px-2 whitespace-nowrap text-center">
+                        {Number(cust.strikes || 0) >= 3 || cust.estadoUsuario === 'SUSPENDIDO' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500/20 text-rose-400 border border-rose-500/40">
+                            3/3 SUSPENDIDO
+                          </span>
+                        ) : Number(cust.strikes || 0) > 0 ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            ⚠️ {cust.strikes}/3 Strikes
+                          </span>
+                        ) : (
+                          <span className="text-gray-500 text-[11px]">0/3</span>
                         )}
                       </td>
 
@@ -1036,7 +1087,7 @@ export default function CustomersManagementPage() {
             {/* Contenido Central Scrollable */}
             <div className="p-6 space-y-6 flex-1 overflow-y-auto">
               {/* Tarjetas Resumen de Perfil */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="p-3 bg-gray-900/60 border border-gray-800 rounded-xl">
                 <span className="text-[10px] uppercase font-bold text-gray-400">Teléfono / WhatsApp</span>
                 <div className="text-sm font-semibold text-emerald-400 mt-1 flex items-center justify-between">
@@ -1051,6 +1102,27 @@ export default function CustomersManagementPage() {
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 bg-gray-900/60 border border-gray-800 rounded-xl">
+                <span className="text-[10px] uppercase font-bold text-gray-400">Billetera / Saldo</span>
+                <div className="text-sm font-black text-emerald-400 mt-1 flex items-center gap-1">
+                  <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>${Number(viewingCustomer.walletBalance || 0).toLocaleString('es-CO')}</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-gray-900/60 border border-gray-800 rounded-xl">
+                <span className="text-[10px] uppercase font-bold text-gray-400">Infracciones (Strikes)</span>
+                <div className="text-sm font-black mt-1">
+                  {Number(viewingCustomer.strikes || 0) >= 3 || viewingCustomer.estadoUsuario === 'SUSPENDIDO' ? (
+                    <span className="text-rose-400">3/3 SUSPENDIDO</span>
+                  ) : Number(viewingCustomer.strikes || 0) > 0 ? (
+                    <span className="text-amber-400">⚠️ {viewingCustomer.strikes}/3 Strikes</span>
+                  ) : (
+                    <span className="text-emerald-400">0/3 Impecable</span>
                   )}
                 </div>
               </div>
@@ -1144,7 +1216,32 @@ export default function CustomersManagementPage() {
 
                         {/* Credenciales de la cuenta */}
                         {sub.account ? (
-                          <div className="p-2.5 bg-black/40 border border-gray-800/80 rounded-lg text-[11px] font-mono space-y-1">
+                          <div className="p-2.5 bg-black/40 border border-gray-800/80 rounded-lg text-[11px] font-mono space-y-1.5">
+                            {/* ID Único de la Cuenta Comprada */}
+                            <div className="flex items-center justify-between pb-1.5 mb-1 border-b border-gray-800/80">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-gray-400 uppercase font-sans font-bold">ID Cuenta:</span>
+                                <span className="px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-mono text-[10px] font-bold">
+                                  #ACC-{(sub.account.id || sub.accountId || '').substring(0, 8).toUpperCase()}
+                                </span>
+                                <span className="text-[9px] text-gray-500 font-mono hidden sm:inline" title={sub.account.id || sub.accountId}>
+                                  ({sub.account.id || sub.accountId})
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => handleCopy(sub.account.id || sub.accountId, `modal-acc-${sub.id}`)}
+                                className="text-gray-500 hover:text-white p-0.5 cursor-pointer"
+                                data-tooltip="Copiar ID de la cuenta"
+                                title="Copiar ID de la cuenta"
+                              >
+                                {copiedId === `modal-acc-${sub.id}` ? (
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+
                             <div className="flex items-center justify-between text-gray-300">
                               <span className="truncate">{sub.account.emailCuenta}</span>
                               <button

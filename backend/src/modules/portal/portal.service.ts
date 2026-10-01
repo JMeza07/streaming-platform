@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
+import { ImapService } from '../accounts/imap.service';
 import { RequestWarrantyDto } from './dto/request-warranty.dto';
 import { RenewSubscriptionDto } from './dto/renew-subscription.dto';
-import { SubscriptionStatus, OrderStatus, AccountStatus } from '@prisma/client';
+import { SubscriptionStatus, OrderStatus, AccountStatus, RootAccountStatus } from '@prisma/client';
 
 function extractMotivoCancelacion(descripcionVenta?: string | null): string {
   if (!descripcionVenta) return 'Cancelación de la orden por parte del administrador.';
@@ -16,9 +17,12 @@ function extractMotivoCancelacion(descripcionVenta?: string | null): string {
 
 @Injectable()
 export class PortalService {
+  private readonly logger = new Logger(PortalService.name);
+
   constructor(
     private prisma: PrismaService,
     private ordersService: OrdersService,
+    private imapService: ImapService,
   ) {}
 
   // OBTENER SUSCRIPCIONES ACTIVAS DEL CLIENTE
@@ -43,6 +47,7 @@ export class PortalService {
             passwordCuenta: true,
             perfilAsignado: true,
             pinPerfil: true,
+            assignedPin: true,
           }
         },
         order: {
@@ -97,12 +102,17 @@ export class PortalService {
         diasRestantes,
         estado: sub.estado,
         autoRenovar: sub.autoRenovar,
+        emailCuenta: sub.account?.emailCuenta,
+        passwordCuenta: sub.account?.passwordCuenta,
+        perfilAsignado: sub.account?.perfilAsignado,
+        pinPerfil: sub.account?.assignedPin || sub.account?.pinPerfil,
+        assignedPin: sub.account?.assignedPin || sub.account?.pinPerfil,
         // Solo mostrar credenciales si está activa
         credenciales: sub.estado === SubscriptionStatus.ACTIVA ? {
           email: sub.account.emailCuenta,
           password: sub.account.passwordCuenta,
           perfil: sub.account.perfilAsignado,
-          pin: sub.account.pinPerfil,
+          pin: sub.account.assignedPin || sub.account.pinPerfil,
         } : null,
       };
     });
@@ -135,6 +145,24 @@ export class PortalService {
     const diasRestantes = Math.ceil((vencimiento.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
     const accId = subscription.account?.id || subscription.accountId;
 
+    // ESCENARIO 1: Registrar factor de seguridad - Las credenciales han sido vistas
+    if (!subscription.credencialesVistas) {
+      await this.prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          credencialesVistas: true,
+          credencialesVistasAt: new Date(),
+        },
+      });
+
+      if (subscription.orderId) {
+        await this.prisma.order.update({
+          where: { id: subscription.orderId },
+          data: { credencialesVistas: true },
+        }).catch(() => {});
+      }
+    }
+
     return {
       id: subscription.id,
       orderId: subscription.orderId,
@@ -160,15 +188,16 @@ export class PortalService {
       diasRestantes,
       estado: subscription.estado,
       autoRenovar: subscription.autoRenovar,
+      credencialesVistas: true,
       credenciales: {
         email: subscription.account.emailCuenta,
         password: subscription.account.passwordCuenta,
         perfil: subscription.account.perfilAsignado,
-        pin: subscription.account.pinPerfil,
+        pin: subscription.account.assignedPin || subscription.account.pinPerfil,
       },
       reglasUso: [
         'No cambiar la contraseña ni el correo',
-        'No crear ni modificar el PIN del perfil',
+        'No crear ni modificar el PIN del perfil sin autorización',
         'Usar solo en el país registrado',
         'Reportar errores inmediatamente'
       ]
@@ -200,7 +229,10 @@ export class PortalService {
               select: {
                 id: true,
                 emailCuenta: true,
+                passwordCuenta: true,
                 perfilAsignado: true,
+                pinPerfil: true,
+                assignedPin: true,
               }
             }
           }
@@ -250,7 +282,10 @@ export class PortalService {
           fechaVencimiento: sub.fechaVencimiento,
           diasRestantes,
           emailCuenta: sub.account?.emailCuenta,
+          passwordCuenta: order.estado === 'PAGADO' ? sub.account?.passwordCuenta : null,
           perfilAsignado: sub.account?.perfilAsignado,
+          pinPerfil: order.estado === 'PAGADO' ? (sub.account?.assignedPin || sub.account?.pinPerfil) : null,
+          assignedPin: order.estado === 'PAGADO' ? (sub.account?.assignedPin || sub.account?.pinPerfil) : null,
         };
       })
     }));
@@ -281,7 +316,10 @@ export class PortalService {
               select: {
                 id: true,
                 emailCuenta: true,
+                passwordCuenta: true,
                 perfilAsignado: true,
+                pinPerfil: true,
+                assignedPin: true,
               }
             }
           }
@@ -291,6 +329,21 @@ export class PortalService {
 
     if (!order) {
       throw new NotFoundException('Orden de compra no encontrada');
+    }
+
+    if (order.estado === 'PAGADO' && order.subscriptions?.length > 0 && !order.credencialesVistas) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { credencialesVistas: true },
+      }).catch(() => {});
+      for (const s of order.subscriptions) {
+        if (!s.credencialesVistas) {
+          await this.prisma.subscription.update({
+            where: { id: s.id },
+            data: { credencialesVistas: true, credencialesVistasAt: new Date() },
+          }).catch(() => {});
+        }
+      }
     }
 
     return {
@@ -334,7 +387,10 @@ export class PortalService {
           fechaVencimiento: sub.fechaVencimiento,
           diasRestantes,
           emailCuenta: sub.account?.emailCuenta,
+          passwordCuenta: sub.account?.passwordCuenta,
           perfilAsignado: sub.account?.perfilAsignado,
+          pinPerfil: sub.account?.assignedPin || sub.account?.pinPerfil,
+          assignedPin: sub.account?.assignedPin || sub.account?.pinPerfil,
         };
       })
     };
@@ -580,9 +636,213 @@ const subscription = await this.prisma.subscription.findFirst({
       email: customer.user.email,
       whatsapp: customer.whatsapp,
       pais: customer.pais,
+      walletBalance: Number(customer.walletBalance || 0),
+      strikes: customer.strikes || 0,
+      estadoUsuario: customer.estadoUsuario || 'ACTIVO',
       suscripcionesActivas,
       porVencer,
       miembroDesde: customer.createdAt,
+    };
+  }
+
+  // =========================================================================
+  // ESCENARIO 1: MARCAR CREDENCIALES COMO VISTAS EXPLÍCITAMENTE
+  // =========================================================================
+  async markCredentialsViewed(customerId: string, subscriptionId: string) {
+    const sub = await this.prisma.subscription.findFirst({
+      where: { id: subscriptionId, customerId },
+    });
+    if (!sub) throw new NotFoundException('Suscripción no encontrada');
+
+    await this.prisma.subscription.update({
+      where: { id: subscriptionId },
+      data: {
+        credencialesVistas: true,
+        credencialesVistasAt: new Date(),
+      },
+    });
+
+    if (sub.orderId) {
+      await this.prisma.order.update({
+        where: { id: sub.orderId },
+        data: { credencialesVistas: true },
+      }).catch(() => {});
+    }
+
+    return { success: true, credencialesVistas: true };
+  }
+
+  // =========================================================================
+  // ESCENARIO 7: SOLICITAR CÓDIGO DE HOGAR / IP TEMPORAL (IMAP + REGEX)
+  // =========================================================================
+  async requestHouseholdCode(customerId: string, subscriptionId: string) {
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { id: subscriptionId, customerId },
+      include: {
+        account: {
+          include: { rootAccount: true },
+        },
+        plan: { include: { service: true } },
+      },
+    });
+
+    if (!subscription) throw new NotFoundException('Suscripción no encontrada');
+    if (subscription.estado !== SubscriptionStatus.ACTIVA) {
+      throw new BadRequestException('Solo puedes solicitar códigos para suscripciones activas');
+    }
+
+    const root = subscription.account.rootAccount;
+    const serviceName = subscription.plan.service.nombre;
+
+    // Escanear bandeja vía IMAP
+    const codeResult = await this.imapService.extractLatestHouseholdCode({
+      host: root?.imapHost,
+      port: root?.imapPort,
+      user: root?.imapUser || root?.email || subscription.account.emailCuenta,
+      password: root?.imapPassword,
+      secure: root?.imapSecure,
+      serviceName,
+    });
+
+    return {
+      success: true,
+      servicio: serviceName,
+      codigo: codeResult.codigo,
+      asunto: codeResult.asunto,
+      remitente: codeResult.remitente,
+      fechaCorreo: codeResult.fecha,
+      mensaje: `Código de confirmación de hogar para ${serviceName} obtenido con éxito. Ingresa este código en tu dispositivo.`,
+    };
+  }
+
+  // =========================================================================
+  // ESCENARIO 3: REPORTAR PANTALLA OCUPADA (INTRUSIÓN DE PERFIL)
+  // =========================================================================
+  async reportOccupiedScreen(customerId: string, subscriptionId: string, motivo?: string) {
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { id: subscriptionId, customerId },
+      include: {
+        account: { include: { rootAccount: true } },
+        plan: { include: { service: true } },
+        customer: { include: { user: true } },
+      },
+    });
+
+    if (!subscription) throw new NotFoundException('Suscripción no encontrada');
+
+    const root = subscription.account.rootAccount;
+
+    // 1. Crear registro de infracción/reporte
+    const infraction = await this.prisma.profileInfraction.create({
+      data: {
+        customerId,
+        reportadoPorCustomerId: customerId,
+        accountId: subscription.accountId,
+        rootAccountId: root?.id || null,
+        tipo: 'PANTALLA_OCUPADA',
+        descripcion: motivo || 'Cliente reporta que su pantalla asignada está ocupada por otro usuario no autorizado.',
+        strikesAplicados: 1,
+        estado: 'PENDIENTE',
+      },
+    });
+
+    // 2. Marcar cuenta raíz en auditoría si existe
+    if (root) {
+      await this.prisma.rootAccount.update({
+        where: { id: root.id },
+        data: { estado: RootAccountStatus.EN_AUDITORIA },
+      });
+    }
+
+    // 3. Crear ticket de soporte para el equipo de administración
+    await this.prisma.supportTicket.create({
+      data: {
+        subscriptionId,
+        customerId,
+        motivoReporte: 'pantalla_ocupada',
+        estado: 'pendiente_revision',
+        evidenciaUrl: `[REPORTE_PANTALLA_OCUPADA] InfractionId: ${infraction.id} | Cuenta: ${subscription.account.emailCuenta} | Perfil: ${subscription.account.perfilAsignado || 'N/A'}`,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Reporte de pantalla ocupada recibido. Nuestro equipo técnico auditará la cuenta raíz y cambiará las credenciales para restituir tu acceso.',
+      infractionId: infraction.id,
+    };
+  }
+
+  // =========================================================================
+  // ESCENARIO 13: GESTIÓN DE PIN EXCLUSIVA Y REPORTE DE SECUESTRO DE PIN
+  // =========================================================================
+  async setProfilePin(customerId: string, subscriptionId: string, pin: string) {
+    if (!pin || !/^\d{4}$/.test(pin.trim())) {
+      throw new BadRequestException('El PIN de perfil debe constar de exactamente 4 dígitos numéricos');
+    }
+
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { id: subscriptionId, customerId },
+      include: { account: true },
+    });
+
+    if (!subscription) throw new NotFoundException('Suscripción no encontrada');
+
+    const cleanPin = pin.trim();
+
+    await this.prisma.account.update({
+      where: { id: subscription.accountId },
+      data: {
+        assignedPin: cleanPin,
+        pinPerfil: cleanPin,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'PIN de perfil configurado exitosamente.',
+      pin: cleanPin,
+    };
+  }
+
+  async reportPinHijack(customerId: string, subscriptionId: string, descripcion?: string) {
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { id: subscriptionId, customerId },
+      include: {
+        account: { include: { rootAccount: true } },
+        customer: { include: { user: true } },
+      },
+    });
+
+    if (!subscription) throw new NotFoundException('Suscripción no encontrada');
+
+    const infraction = await this.prisma.profileInfraction.create({
+      data: {
+        customerId,
+        reportadoPorCustomerId: customerId,
+        accountId: subscription.accountId,
+        rootAccountId: subscription.account.rootAccountId,
+        tipo: 'SECUESTRO_PIN',
+        descripcion: descripcion || 'Cliente reporta alteración o bloqueo de PIN en su perfil asignado.',
+        strikesAplicados: 1,
+        estado: 'PENDIENTE',
+      },
+    });
+
+    // Abrir ticket de soporte
+    await this.prisma.supportTicket.create({
+      data: {
+        subscriptionId,
+        customerId,
+        motivoReporte: 'secuestro_pin',
+        estado: 'pendiente_revision',
+        evidenciaUrl: `[SECUESTRO_PIN] PIN registrado en BD: ${subscription.account.assignedPin || 'Sin PIN'}. InfractionId: ${infraction.id}`,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Reporte de secuestro o alteración de PIN recibido. Se ha abierto una infracción para auditar a los usuarios de la cuenta.',
+      assignedPinEnSistema: subscription.account.assignedPin || subscription.account.pinPerfil || 'No asignado',
     };
   }
 }

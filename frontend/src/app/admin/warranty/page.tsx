@@ -78,6 +78,11 @@ export default function WarrantyPage() {
           },
         }));
       }
+      const accCode = `#ACC-${accountId.substring(0, 8).toUpperCase()}`;
+      await alert(`Estado de la cuenta ${accCode} (ID: ${accountId}) actualizado a ${newStatus}`, {
+        type: 'success',
+        title: 'Estado de Cuenta Actualizado',
+      });
     } catch (err: any) {
       await alert(err.response?.data?.message || 'Error al actualizar el estado de la cuenta', { type: 'error', title: 'Error de Actualización' });
     } finally {
@@ -135,7 +140,12 @@ export default function WarrantyPage() {
         decision,
         motivoRechazo: notas.trim() || undefined,
       });
-      await alert(res.data?.message || 'Ticket resuelto con éxito', { type: 'success', title: 'Ticket Resuelto' });
+      const nuevaAcc = res.data?.nuevaCuenta;
+      const successTitle = decision === 'aprobado_reemplazo' ? 'Garantía Aprobada & Cuenta Reemplazada' : 'Ticket Resuelto';
+      const msg = nuevaAcc
+        ? `Garantía aprobada con éxito. Se asignó la cuenta de reemplazo ${nuevaAcc.codigo || nuevaAcc.id} (ID: ${nuevaAcc.id}) al cliente.`
+        : res.data?.message || 'Ticket resuelto con éxito';
+      await alert(msg, { type: 'success', title: successTitle });
       setResolveModal(null);
       if (viewingTicket?.id === ticket.id) {
         setViewingTicket(null);
@@ -153,7 +163,11 @@ export default function WarrantyPage() {
       setAssigningId(ticketId);
       const res = await api.post(`/warranty/tickets/${ticketId}/assign-account`);
       if (res.data?.exito) {
-        await alert(res.data.mensaje || '¡Cuenta asignada y enviada al cliente por WhatsApp con éxito!', { type: 'success', title: 'Cuenta Asignada' });
+        const nuevaAcc = res.data?.nuevaCuenta;
+        const msg = nuevaAcc
+          ? `¡Cuenta ${nuevaAcc.codigo || nuevaAcc.id} (ID: ${nuevaAcc.id}) asignada y enviada al cliente por WhatsApp con éxito!`
+          : res.data.mensaje || '¡Cuenta asignada y enviada al cliente por WhatsApp con éxito!';
+        await alert(msg, { type: 'success', title: 'Cuenta Asignada' });
         if (viewingTicket?.id === ticketId) {
           setViewingTicket(null);
         }

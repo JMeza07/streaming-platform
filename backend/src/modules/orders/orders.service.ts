@@ -88,17 +88,34 @@ export class OrdersService {
       ? `Orden registrada por Vendedor: ${vendedorNombre} | Fecha y Hora: ${fechaHoraCreacion}`
       : `Venta online directa | Fecha y Hora: ${fechaHoraCreacion}`;
 
-    // 3. Crear la orden en transacción (con validación de stock atómica)
+    // 3. Crear la orden en transacción con reserva TTL de 15 minutos (Escenario 8)
     const order = await this.prisma.$transaction(async (tx) => {
-      // Validar stock dentro de la transacción para evitar race conditions
+      const reservedUntil = new Date(Date.now() + 15 * 60 * 1000);
+
+      // Validar y reservar stock atómicamente con TTL de 15 minutos
       for (const item of itemsData) {
-        const stockDisponible = await tx.account.count({
+        const availableAccounts = await tx.account.findMany({
           where: { planId: item.planId, estado: AccountStatus.DISPONIBLE },
+          take: item.cantidad,
+          orderBy: { createdAt: 'asc' },
         });
-        if (stockDisponible < item.cantidad) {
+
+        if (availableAccounts.length < item.cantidad) {
           throw new BadRequestException(
-            `Stock insuficiente para ${item.nombrePlan}. Disponibles: ${stockDisponible}`,
+            `Stock insuficiente para ${item.nombrePlan}. Disponibles: ${availableAccounts.length}`,
           );
+        }
+
+        // Marcar perfiles reservados como PENDIENTE_PAGO con TTL de 15 minutos
+        for (const acc of availableAccounts) {
+          await tx.account.update({
+            where: { id: acc.id },
+            data: {
+              estado: AccountStatus.PENDIENTE_PAGO,
+              reservedUntil,
+              reservedByCustomerId: dto.customerId,
+            },
+          });
         }
       }
 
@@ -446,6 +463,8 @@ export class OrdersService {
       },
       suscripciones: resultado.suscripciones.map((s) => ({
         id: s.id,
+        accountId: s.accountId || s.account?.id,
+        accountCode: (s.accountId || s.account?.id) ? `#ACC-${(s.accountId || s.account?.id).substring(0, 8).toUpperCase()}` : null,
         servicio: s.plan.service.nombre,
         plan: s.plan.nombrePlan,
         emailCuenta: s.account.emailCuenta,
@@ -595,19 +614,43 @@ export class OrdersService {
       // 3. Para cada item, buscar cuenta disponible y crear suscripción
       for (const item of order.items) {
         for (let i = 0; i < item.cantidad; i++) {
-          // Buscar cuenta disponible (FIFO)
-          const account = await tx.account.findFirst({
-            where: { planId: item.planId, estado: AccountStatus.DISPONIBLE },
+          // Buscar cuenta previamente reservada con TTL para este cliente o disponible (FIFO)
+          let account = await tx.account.findFirst({
+            where: {
+              planId: item.planId,
+              reservedByCustomerId: order.customerId,
+              estado: AccountStatus.PENDIENTE_PAGO,
+            },
             orderBy: { createdAt: 'asc' },
           });
+
+          if (!account) {
+            account = await tx.account.findFirst({
+              where: { planId: item.planId, estado: AccountStatus.DISPONIBLE },
+              orderBy: { createdAt: 'asc' },
+            });
+          }
 
           if (!account) {
             throw new BadRequestException(`Stock agotado durante la entrega para ${item.plan.nombrePlan}`);
           }
 
-          // Calcular fecha de vencimiento
-          const fechaVencimiento = new Date();
-          fechaVencimiento.setDate(fechaVencimiento.getDate() + item.plan.duracionDias);
+          // Calcular fecha de vencimiento: si es upgrade prorrateado (Escenario 12), sincronizar con la orden padre
+          let fechaVencimiento = new Date();
+          let parentSubId: string | null = null;
+          if (order.esProrrateo && order.parentOrderId) {
+            const parentSub = await tx.subscription.findFirst({
+              where: { orderId: order.parentOrderId, estado: SubscriptionStatus.ACTIVA },
+            });
+            if (parentSub) {
+              fechaVencimiento = new Date(parentSub.fechaVencimiento);
+              parentSubId = parentSub.id;
+            } else {
+              fechaVencimiento.setDate(fechaVencimiento.getDate() + item.plan.duracionDias);
+            }
+          } else {
+            fechaVencimiento.setDate(fechaVencimiento.getDate() + item.plan.duracionDias);
+          }
 
           // Crear suscripción
           const subscription = await tx.subscription.create({
@@ -616,6 +659,7 @@ export class OrdersService {
               planId: item.planId,
               accountId: account.id,
               orderId: order.id,
+              parentSubscriptionId: parentSubId,
               fechaVencimiento,
               estado: 'ACTIVA',
             },
@@ -625,10 +669,14 @@ export class OrdersService {
             },
           });
 
-          // Marcar cuenta como ocupada
+          // Marcar cuenta como ocupada y limpiar reserva TTL
           await tx.account.update({
             where: { id: account.id },
-            data: { estado: AccountStatus.OCUPADA },
+            data: {
+              estado: AccountStatus.OCUPADA,
+              reservedUntil: null,
+              reservedByCustomerId: null,
+            },
           });
 
           suscripciones.push(subscription);
@@ -678,6 +726,8 @@ export class OrdersService {
       } : null,
       suscripciones: suscripcionesCreadas.map(s => ({
         id: s.id,
+        accountId: s.accountId || s.account.id,
+        accountCode: (s.accountId || s.account.id) ? `#ACC-${(s.accountId || s.account.id).substring(0, 8).toUpperCase()}` : null,
         servicio: s.plan.service.nombre,
         plan: s.plan.nombrePlan,
         email: s.account.emailCuenta,
@@ -1057,11 +1107,36 @@ export class OrdersService {
       email: string;
       servicio: string;
       plan: string;
+      estadoFinal: string;
     }> = [];
 
+    // ESCENARIO 1: Factor de seguridad - ¿Fueron vistas las credenciales?
+    const credencialesVistas = order.credencialesVistas || order.subscriptions.some((s) => s.credencialesVistas);
+    let estadoDestinoCuenta: AccountStatus = AccountStatus.DISPONIBLE;
+    let reembolsoWallet = 0;
+
     await this.prisma.$transaction(async (tx) => {
-      // 1. Cambiar estado de la orden a CANCELADO y registrar motivo
-      const cancelNote = `[VENTA CANCELADA - ${new Date().toLocaleString('es-CO')} por ${currentUser?.nombre || currentUser?.email || 'Usuario'}]: ${motivo || 'Cancelación de venta'}`;
+      // Si las credenciales NO fueron vistas: devolver a DISPONIBLE y reembolsar a la billetera (wallet) del cliente
+      if (!credencialesVistas) {
+        estadoDestinoCuenta = AccountStatus.DISPONIBLE;
+        reembolsoWallet = Number(order.total);
+        await tx.customer.update({
+          where: { id: order.customerId },
+          data: {
+            walletBalance: { increment: order.total },
+          },
+        });
+      } else {
+        // Si las credenciales SÍ fueron vistas: mover a CUARENTENA y exigir cambio de contraseña raíz antes de devolverlo a disponible
+        estadoDestinoCuenta = AccountStatus.CUARENTENA;
+      }
+
+      // 1. Cambiar estado de la orden a CANCELADO y registrar motivo y notas de seguridad
+      const securityNote = !credencialesVistas
+        ? `[SEGURIDAD: Credenciales NO vistas. Saldo de $${reembolsoWallet.toLocaleString('es-CO')} reembolsado a la billetera del cliente]`
+        : `[SEGURIDAD: Credenciales SÍ vistas por el cliente. Perfil puesto en CUARENTENA hasta rotación de contraseña raíz]`;
+
+      const cancelNote = `[VENTA CANCELADA - ${new Date().toLocaleString('es-CO')} por ${currentUser?.nombre || currentUser?.email || 'Usuario'}]: ${motivo || 'Cancelación de venta'} | ${securityNote}`;
       await tx.order.update({
         where: { id: orderId },
         data: {
@@ -1072,16 +1147,13 @@ export class OrdersService {
         },
       });
 
-      // 2. Procesar suscripciones y devolución de cuentas seleccionadas al inventario
+      // 2. Procesar suscripciones y perfiles según el factor de seguridad
       for (const sub of order.subscriptions) {
-        // Cancelar la suscripción asociada
         await tx.subscription.update({
           where: { id: sub.id },
           data: { estado: SubscriptionStatus.CANCELADA },
         });
 
-        // Verificar si la cuenta asociada debe devolverse al inventario
-        // Si accountIdsToRestore es provisto, solo se devuelven las cuentas en la lista. Si no se provee, se devuelven todas por defecto.
         const shouldRestore = Array.isArray(accountIdsToRestore)
           ? accountIdsToRestore.includes(sub.accountId) || (sub.account && accountIdsToRestore.includes(sub.account.id))
           : true;
@@ -1089,8 +1161,16 @@ export class OrdersService {
         if (shouldRestore && sub.account) {
           await tx.account.update({
             where: { id: sub.account.id },
-            data: { estado: AccountStatus.DISPONIBLE },
+            data: { estado: estadoDestinoCuenta },
           });
+
+          // Si pasó a cuarentena y tiene cuenta raíz vinculada, marcar alerta de cambio de contraseña
+          if (estadoDestinoCuenta === AccountStatus.CUARENTENA && sub.account.rootAccountId) {
+            await tx.rootAccount.update({
+              where: { id: sub.account.rootAccountId },
+              data: { requiresPasswordChange: true },
+            }).catch(() => {});
+          }
 
           restoredAccounts.push({
             id: sub.account.id,
@@ -1098,6 +1178,7 @@ export class OrdersService {
             email: sub.account.emailCuenta,
             servicio: sub.plan?.service?.nombre || 'Streaming',
             plan: sub.plan?.nombrePlan || 'Plan',
+            estadoFinal: estadoDestinoCuenta,
           });
         }
       }
@@ -1387,6 +1468,8 @@ export class OrdersService {
       suscripciones: [
         {
           id: subscription.id,
+          accountId: subscription.accountId || subscription.account?.id,
+          accountCode: (subscription.accountId || subscription.account?.id) ? `#ACC-${(subscription.accountId || subscription.account?.id).substring(0, 8).toUpperCase()}` : null,
           servicio: subscription.plan?.service?.nombre,
           plan: subscription.plan?.nombrePlan,
           email: subscription.account?.emailCuenta,
@@ -1396,5 +1479,90 @@ export class OrdersService {
         },
       ],
     };
+  }
+
+  // =========================================================================
+  // ESCENARIO 12: UPGRADE DE PANTALLA ADICIONAL CON PRORRATEO
+  // =========================================================================
+  async createProratedUpgrade(
+    customerId: string,
+    parentSubscriptionId: string,
+    planId: string,
+    dto: { metodoPago?: string; comprobanteUrl?: string },
+  ) {
+    const parentSub = await this.prisma.subscription.findFirst({
+      where: { id: parentSubscriptionId, customerId },
+      include: { plan: { include: { service: true } }, order: true },
+    });
+
+    if (!parentSub) throw new NotFoundException('Suscripción principal no encontrada');
+
+    const now = new Date();
+    const vencimiento = new Date(parentSub.fechaVencimiento);
+    const diasRestantes = Math.max(1, Math.ceil((vencimiento.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+    const newPlan = await this.prisma.plan.findUnique({
+      where: { id: planId },
+      include: { service: true },
+    });
+    if (!newPlan) throw new NotFoundException('Plan para pantalla adicional no encontrado');
+
+    // Cálculo prorrateado: (Precio_Mes / 30) * Días_Restantes
+    const precioBase = Number(newPlan.precio);
+    const precioProrrateado = Math.round((precioBase / 30) * diasRestantes);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Reservar cuenta disponible
+      const availableAccount = await tx.account.findFirst({
+        where: { planId, estado: AccountStatus.DISPONIBLE },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (!availableAccount) {
+        throw new BadRequestException('No hay pantallas disponibles en este momento para agregar a tu suscripción.');
+      }
+
+      const reservedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      await tx.account.update({
+        where: { id: availableAccount.id },
+        data: {
+          estado: AccountStatus.PENDIENTE_PAGO,
+          reservedUntil,
+          reservedByCustomerId: customerId,
+        },
+      });
+
+      // 2. Crear orden de upgrade prorrateada
+      const upgradeOrder = await tx.order.create({
+        data: {
+          customerId,
+          parentOrderId: parentSub.orderId,
+          esProrrateo: true,
+          total: precioProrrateado,
+          estado: OrderStatus.PENDIENTE,
+          metodoPago: dto.metodoPago,
+          comprobanteUrl: dto.comprobanteUrl,
+          descripcionVenta: `[UPGRADE PRORRATEADO] Pantalla adicional sincronizada con suscripción ${parentSub.id} (${diasRestantes} días restantes hasta ${vencimiento.toLocaleDateString('es-CO')})`,
+          items: {
+            create: [
+              {
+                planId,
+                cantidad: 1,
+                precioUnitario: precioProrrateado,
+                subtotal: precioProrrateado,
+              },
+            ],
+          },
+        },
+        include: { items: true, customer: { include: { user: true } } },
+      });
+
+      return {
+        message: 'Orden de pantalla adicional creada con cálculo prorrateado exitosamente.',
+        order: upgradeOrder,
+        diasRestantes,
+        precioProrrateado,
+        fechaVencimientoSincronizada: parentSub.fechaVencimiento,
+      };
+    });
   }
 }

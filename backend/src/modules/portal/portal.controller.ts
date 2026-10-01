@@ -14,7 +14,7 @@ import { RenewSubscriptionDto } from './dto/renew-subscription.dto';
 export class PortalController {
   constructor(private readonly portalService: PortalService) {}
 
-  // RESUMEN DEL CLIENTE
+  // RESUMEN DEL CLIENTE (Incluye saldo de billetera y strikes)
   @Get('summary')
   getSummary(@CurrentUser() user: any) {
     return this.portalService.getCustomerSummary(user.customerId);
@@ -33,6 +33,50 @@ export class PortalController {
     @Param('id') id: string
   ) {
     return this.portalService.getSubscriptionDetails(user.customerId, id);
+  }
+
+  // ESCENARIO 1: REGISTRAR VISUALIZACIÓN DE CREDENCIALES
+  @Post('subscriptions/:id/view-credentials')
+  markViewed(
+    @CurrentUser() user: any,
+    @Param('id') id: string
+  ) {
+    return this.portalService.markCredentialsViewed(user.customerId, id);
+  }
+
+  // ESCENARIO 7: SOLICITAR CÓDIGO DE HOGAR / IP TEMPORAL (IMAP + REGEX)
+  @Post('subscriptions/:id/household-code')
+  requestHouseholdCode(
+    @CurrentUser() user: any,
+    @Param('id') id: string
+  ) {
+    return this.portalService.requestHouseholdCode(user.customerId, id);
+  }
+
+  // ESCENARIO 3: REPORTAR PANTALLA OCUPADA (INTRUSIÓN)
+  @Post('report-occupied-screen')
+  reportOccupiedScreen(
+    @CurrentUser() user: any,
+    @Body() body: { subscriptionId: string; motivo?: string }
+  ) {
+    return this.portalService.reportOccupiedScreen(user.customerId, body.subscriptionId, body.motivo);
+  }
+
+  // ESCENARIO 13: GESTIÓN DE PIN Y REPORTE DE SECUESTRO DE PIN
+  @Post('set-pin')
+  setPin(
+    @CurrentUser() user: any,
+    @Body() body: { subscriptionId: string; pin: string }
+  ) {
+    return this.portalService.setProfilePin(user.customerId, body.subscriptionId, body.pin);
+  }
+
+  @Post('report-pin-hijack')
+  reportPinHijack(
+    @CurrentUser() user: any,
+    @Body() body: { subscriptionId: string; descripcion?: string }
+  ) {
+    return this.portalService.reportPinHijack(user.customerId, body.subscriptionId, body.descripcion);
   }
 
   // HISTORIAL DE COMPRAS

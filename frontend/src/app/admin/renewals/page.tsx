@@ -105,6 +105,7 @@ export default function RenewalsPage() {
   const [viewingDetailOrder, setViewingDetailOrder] = useState<RenewalOrder | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+  const [billingMismatches, setBillingMismatches] = useState<any[]>([]);
 
   useEffect(() => {
     const raw = Cookies.get('user') || (typeof window !== 'undefined' ? localStorage.getItem('user') : null);
@@ -133,8 +134,12 @@ export default function RenewalsPage() {
   const fetchRenewals = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/orders/renewals');
+      const [res, mismatchesRes] = await Promise.all([
+        api.get('/orders/renewals'),
+        api.get('/accounts/billing-mismatches').catch(() => ({ data: [] })),
+      ]);
       setRenewals(res.data || []);
+      setBillingMismatches(mismatchesRes.data || []);
     } catch (err) {
       console.error('Error fetching renewals:', err);
     } finally {
@@ -275,7 +280,8 @@ export default function RenewalsPage() {
         comprobanteUrl: confirmApproveOrder.comprobanteUrl,
       });
 
-      setFeedbackSuccess(`¡Renovación #${confirmApproveOrder.id.slice(-6)} aprobada con éxito! La vigencia de la suscripción ha sido extendida.`);
+      const meta = parseRenewalMeta(confirmApproveOrder.descripcionVenta);
+      setFeedbackSuccess(`¡Renovación #${confirmApproveOrder.id.slice(-6)} para cuenta ${meta.accountCode} aprobada con éxito! La vigencia de la suscripción ha sido extendida.`);
       setTimeout(() => setFeedbackSuccess(null), 5000);
 
       setConfirmApproveOrder(null);
@@ -445,6 +451,55 @@ export default function RenewalsPage() {
           </p>
         </div>
       </div>
+
+      {/* Alerta de Desfase de Facturación (Escenario 4) */}
+      {billingMismatches.length > 0 && (
+        <div className="bg-gradient-to-r from-rose-950/80 via-red-950/40 to-gray-900/90 border-2 border-rose-500/60 rounded-3xl p-5 shadow-2xl backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                <AlertTriangle className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                    Alerta de Renovación Prioritaria — Desfase de Facturación ({billingMismatches.length})
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/30 text-rose-200 border border-rose-500/50">
+                    Atención Inmediata
+                  </span>
+                </div>
+                <p className="text-xs text-rose-200/80 mt-0.5">
+                  Los clientes tienen vigencia activa que supera la fecha de vencimiento de la cuenta raíz proveedora. Recarga la cuenta raíz antes de que expire.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {billingMismatches.map((item, idx) => (
+              <div key={idx} className="bg-gray-950/70 border border-rose-900/40 rounded-2xl p-3.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white truncate">{item.serviceName || 'Servicio'}</span>
+                  <span className="px-2 py-0.5 rounded-md font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px]">
+                    Desfase: {item.daysDifference}d
+                  </span>
+                </div>
+                <div className="text-[11px] text-gray-300 truncate">
+                  <span className="text-gray-500">Cuenta Raíz:</span> {item.accountEmail}
+                </div>
+                <div className="text-[11px] text-gray-300 truncate">
+                  <span className="text-gray-500">Cliente:</span> {item.customerName || 'N/A'} {item.customerPhone ? `(${item.customerPhone})` : ''}
+                </div>
+                <div className="pt-2 border-t border-gray-800/80 flex items-center justify-between text-[10px] text-gray-400">
+                  <span>Raíz vence: <strong className="text-rose-400">{new Date(item.rootAccountExpiresAt).toLocaleDateString()}</strong></span>
+                  <span>Cliente vence: <strong className="text-indigo-300">{new Date(item.subscriptionEndsAt).toLocaleDateString()}</strong></span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Barra de Filtros y Búsqueda */}
       <div className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 backdrop-blur-md flex flex-col md:flex-row gap-3 items-center justify-between">
@@ -850,6 +905,12 @@ export default function RenewalsPage() {
                   <span className="text-gray-400">Servicio & Plan:</span>
                   <span className="font-semibold text-indigo-300">
                     {confirmApproveOrder.items?.[0]?.plan?.service?.nombre} - {confirmApproveOrder.items?.[0]?.plan?.nombrePlan}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400">ID Cuenta a Extender:</span>
+                  <span className="font-mono text-amber-300 font-bold px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-800/60 text-[10px]">
+                    {parseRenewalMeta(confirmApproveOrder.descripcionVenta).accountCode}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">

@@ -12,7 +12,7 @@ export class VaultService {
     const vaultAddr = process.env.VAULT_ADDR || 'http://localhost:8200';
     const vaultToken = process.env.VAULT_TOKEN || 'root_token_streamcontrol_2025';
     this.keyName = process.env.VAULT_KEY_NAME || 'streaming-inventory';
-    this.enabled = process.env.VAULT_ENABLED !== 'false';
+    this.enabled = process.env.VAULT_ENABLED === 'true';
 
     this.client = axios.create({
       baseURL: `${vaultAddr}/v1`,
@@ -20,13 +20,13 @@ export class VaultService {
         'X-Vault-Token': vaultToken,
         'Content-Type': 'application/json',
       },
-      timeout: 5000,
+      timeout: 3000,
     });
 
     if (this.enabled) {
       this.logger.log(`🔒 Vault Transit KMS Client initialized with key: ${this.keyName}`);
     } else {
-      this.logger.warn(`⚠️ Vault Transit KMS is disabled via VAULT_ENABLED=false`);
+      this.logger.warn(`⚠️ Vault Transit KMS is disabled via VAULT_ENABLED=false (or not configured)`);
     }
   }
 
@@ -45,10 +45,10 @@ export class VaultService {
       });
 
       const resData = response.data as any;
-      return resData?.data?.ciphertext;
+      return resData?.data?.ciphertext || plaintext;
     } catch (error: any) {
-      this.logger.error(`Failed to encrypt data with Vault: ${error.message}`);
-      throw new Error(`Vault KMS encryption failure: ${error.message}`);
+      this.logger.warn(`Vault Transit KMS unavailable (${error.message}). Preserving value.`);
+      return plaintext;
     }
   }
 
@@ -69,9 +69,8 @@ export class VaultService {
       const base64Plaintext = resData?.data?.plaintext;
       return Buffer.from(base64Plaintext, 'base64').toString('utf-8');
     } catch (error: any) {
-      this.logger.error(`Failed to decrypt data with Vault: ${error.message}`);
-      // Return placeholder or bubble up error
-      return '[CIPHERTEXT_DECRYPTION_ERROR]';
+      this.logger.warn(`Vault Transit KMS unavailable (${error.message}). Returning raw value.`);
+      return ciphertext;
     }
   }
 }

@@ -43,6 +43,9 @@ import {
   Ban,
   CheckSquare,
   Square,
+  KeyRound,
+  EyeOff,
+  CreditCard,
 } from 'lucide-react';
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import { useDialog } from '@/components/Dialog';
@@ -86,6 +89,11 @@ export default function OrdersPage() {
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
+
+  const togglePassword = (id: string) => {
+    setRevealedPasswords((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // Enviar credenciales y términos de suscripción por WhatsApp
   const handleSendSubscriptionWhatsApp = async (sub: any, order: any) => {
@@ -104,6 +112,8 @@ export default function OrdersPage() {
 
     const platformName = sub.plan?.service?.nombre || sub.plataforma || sub.servicio || 'Servicio Streaming';
     const planName = sub.plan?.nombrePlan || sub.planNombre || sub.plan || '';
+    const accId = acc?.id || sub.accountId || '';
+    const accCode = accId ? `#ACC-${accId.substring(0, 8).toUpperCase()}` : '';
     const email = acc?.emailCuenta || acc?.email || 'N/A';
     const password = acc?.passwordCuenta || acc?.password || 'N/A';
     const perfil = acc?.perfilAsignado || acc?.perfil;
@@ -116,6 +126,7 @@ export default function OrdersPage() {
       `Hola *${clientName}* 👋, aquí tienes los detalles de acceso y credenciales de tu suscripción:`,
       ``,
       `🎬 *${platformName}* — ${planName}`,
+      accCode ? `🆔 *ID Cuenta:* ${accCode} (${accId})` : null,
       ``,
       `📧 *Correo:* ${email}`,
       `🔑 *Contraseña:* ${password}`,
@@ -1060,7 +1071,32 @@ export default function OrdersPage() {
                       <span className="text-[11px] text-gray-400">{sub.plan}</span>
                     </div>
 
-                    <div className="space-y-1 font-mono text-[11px] bg-gray-900/80 p-2.5 rounded-lg border border-gray-850">
+                    <div className="space-y-1.5 font-mono text-[11px] bg-gray-900/80 p-2.5 rounded-lg border border-gray-850">
+                      {(sub.accountId || sub.accountCode) && (
+                        <div className="flex justify-between items-center pb-1.5 mb-1 border-b border-gray-800">
+                          <span className="text-gray-400 font-sans font-semibold text-[10px] uppercase">ID Cuenta:</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-amber-300 font-bold px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-800/60 text-[10px]">
+                              {sub.accountCode || `#ACC-${sub.accountId.substring(0, 8).toUpperCase()}`}
+                            </span>
+                            {sub.accountId && (
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(sub.accountId, `deliv-acc-${idx}`)}
+                                className="text-gray-400 hover:text-white p-0.5 cursor-pointer"
+                                data-tooltip="Copiar ID de cuenta"
+                                title="Copiar ID de cuenta"
+                              >
+                                {copiedKey === `deliv-acc-${idx}` ? (
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span className="text-gray-400">Correo:</span>
                         <span className="text-white font-bold">{sub.email}</span>
@@ -1139,222 +1175,262 @@ export default function OrdersPage() {
 
               {/* Contenido con scroll interno */}
               <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4 text-xs">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {/* Información del Cliente */}
-                <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3.5 space-y-2">
-                  <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400">
-                    Datos del Cliente
-                  </p>
-                  <div>
-                    <p className="text-white font-medium">{viewingOrder.customer?.user?.nombre || 'Cliente'}</p>
-                    <p className="text-gray-400 text-[11px]">{viewingOrder.customer?.user?.email}</p>
-                  </div>
-                  {viewingOrder.customer?.whatsapp && (
-                    <a
-                      href={`https://wa.me/${viewingOrder.customer.whatsapp.replace(/[^0-9]/g, '')}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      data-tooltip="WhatsApp"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-800/40 text-emerald-400 rounded-lg font-mono text-[11px] transition-colors"
-                    >
-                      <Phone className="w-3 h-3" />
-                      <span>WhatsApp: {viewingOrder.customer.whatsapp}</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
-                </div>
 
-                {/* Información del Pago */}
-                <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3.5 space-y-2">
-                  <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400">
-                    Estado y Pago
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Estado:</span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full font-bold text-[10px] border uppercase ${
-                        viewingOrder.estado === 'PAGADO'
-                          ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/50'
-                          : viewingOrder.estado === 'PENDIENTE'
-                          ? 'bg-amber-950/60 text-amber-400 border-amber-800/50'
-                          : 'bg-red-950/60 text-red-400 border-red-800/50'
-                      }`}
-                    >
-                      {viewingOrder.estado}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Método:</span>
-                    <span className="text-white font-medium">{viewingOrder.metodoPago || 'Nequi / Bancolombia'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Fecha:</span>
-                    <span className="text-gray-300">
-                      {new Date(viewingOrder.createdAt).toLocaleString('es-CO')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Información de la Venta & Vendedor */}
-                <div className="sm:col-span-2 bg-gradient-to-r from-gray-950 to-gray-900 border border-gray-800 rounded-xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
-                      <UserCheck className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Información de la Venta & Vendedor</span>
-                    </p>
-                    <span className="text-[11px] text-gray-400 font-mono">
-                      {new Date(viewingOrder.createdAt).toLocaleString('es-CO', {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: true,
-                      })}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
-                    <div>
-                      <span className="text-gray-400 block text-[10px]">Vendedor Asignado:</span>
-                      <span className="text-white font-bold text-sm flex items-center gap-1.5">
-                        {viewingOrder.vendedorNombre || viewingOrder.vendedor?.nombre || 'Venta Online Directa (Sin Vendedor)'}
-                      </span>
-                    </div>
-                    {viewingOrder.vendedorComision ? (
-                      <div>
-                        <span className="text-gray-400 block text-[10px]">Comisión / Ganancia Vendedor:</span>
-                        <span className="font-bold text-emerald-400 font-mono text-sm">
-                          +{formatCOP(viewingOrder.vendedorComision)} ({viewingOrder.vendedorPorcentaje}%)
-                        </span>
+                {/* ========================================================================= */}
+                {/* SECCIÓN 1: DATOS DE ACCESO Y CREDENCIALES ENTREGADAS (EN LA PARTE SUPERIOR) */}
+                {/* ========================================================================= */}
+                {viewingOrder.subscriptions && viewingOrder.subscriptions.length > 0 ? (
+                  <div className="bg-gradient-to-r from-emerald-950/80 via-gray-900 to-emerald-950/80 border-2 border-emerald-500/70 rounded-2xl p-4 sm:p-5 shadow-2xl relative overflow-hidden space-y-3.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-emerald-800/40">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
+                          <KeyRound className="w-5 h-5 animate-pulse" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-black text-white uppercase tracking-wider">
+                              Datos de Acceso y Credenciales Entregadas
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                              {viewingOrder.subscriptions.length} Cuenta{viewingOrder.subscriptions.length > 1 ? 's' : ''} Asignada{viewingOrder.subscriptions.length > 1 ? 's' : ''}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-emerald-200/80 mt-0.5">
+                            Cuentas de streaming y perfiles activos entregados al cliente para esta orden.
+                          </p>
+                        </div>
                       </div>
-                    ) : (
-                      <div>
-                        <span className="text-gray-400 block text-[10px]">Canal de Venta:</span>
-                        <span className="text-gray-300 text-xs">Directo Plataforma Web</span>
-                      </div>
-                    )}
-                  </div>
-                  {viewingOrder.descripcionVenta && (
-                    <div className="pt-2 border-t border-gray-850">
-                      <span className="text-gray-400 block text-[10px]">Descripción Oficial de la Venta:</span>
-                      <p className="text-xs text-gray-200 font-mono bg-gray-950/70 px-2.5 py-1.5 rounded-lg border border-gray-850 mt-1">
-                        {viewingOrder.descripcionVenta}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
 
-              {/* Ítems comprados */}
-              <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3.5 space-y-2.5 text-xs">
-                <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400">
-                  Planes y Servicios Solicitados
-                </p>
-                <div className="divide-y divide-gray-850">
-                  {viewingOrder.items?.map((it: any) => (
-                    <div key={it.id} className="py-2 flex items-center justify-between first:pt-0 last:pb-0">
-                      <div>
-                        <p className="font-medium text-white">
-                          {it.plan?.service?.nombre} - {it.plan?.nombrePlan}
-                        </p>
-                        <p className="text-[11px] text-gray-400">
-                          {it.cantidad} unidad(es) × {formatCOP(it.precioUnitario)}
-                        </p>
-                      </div>
-                      <p className="font-bold text-white text-sm">
-                        {formatCOP(Number(it.precioUnitario) * Number(it.cantidad))}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <div className="pt-2 border-t border-gray-800 flex justify-between items-center">
-                  <span className="font-bold text-white">Total de la Orden:</span>
-                  <span className="font-extrabold text-base text-emerald-400">
-                    {formatCOP(viewingOrder.total)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Cuentas de Inventario Entregadas / Vinculadas en esta Orden */}
-              {viewingOrder.subscriptions && viewingOrder.subscriptions.length > 0 && (
-                <div className="bg-gray-950/70 border border-gray-800 rounded-xl p-3.5 space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-white text-[11px] uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                      <Tv className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Cuentas de Inventario Entregadas en este Pedido</span>
-                    </span>
-                    <span className="text-[10px] text-gray-500">
-                      {viewingOrder.subscriptions.length} cuenta(s) asignada(s)
-                    </span>
-                  </div>
-
-                  <div className="space-y-2">
-                    {viewingOrder.subscriptions.map((sub: any) => {
-                      const acc = sub.account;
-                      const accCode = `#ACC-${(acc?.id || sub.accountId || '').substring(0, 8).toUpperCase()}`;
-
-                      return (
-                        <div
-                          key={sub.id}
-                          className="p-3 bg-gray-900/80 border border-gray-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const text = viewingOrder.subscriptions.map((sub: any) => {
+                              const acc = sub.account || sub.credenciales;
+                              return [
+                                `🎬 *${sub.plan?.service?.nombre || 'Streaming'} — ${sub.plan?.nombrePlan || ''}*`,
+                                `📧 *Usuario:* ${acc?.emailCuenta || 'N/A'}`,
+                                `🔑 *Contraseña:* ${acc?.passwordCuenta || 'N/A'}`,
+                                acc?.perfilAsignado ? `👤 *Perfil:* ${acc.perfilAsignado}` : null,
+                                acc?.pinPerfil ? `🔒 *PIN:* ${acc.pinPerfil}` : null,
+                                `📅 *Vencimiento:* ${sub.fechaVencimiento ? new Date(sub.fechaVencimiento).toLocaleDateString('es-CO') : 'N/A'}`,
+                              ].filter(Boolean).join('\n');
+                            }).join('\n\n---\n\n');
+                            handleCopy(text, `copy-all-admin-${viewingOrder.id}`);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-lg shadow-emerald-950/60 transition-all cursor-pointer shrink-0"
                         >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="px-2 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-mono text-[11px] font-bold inline-flex items-center gap-1">
-                                {accCode}
-                              </span>
-                              <button
-                                onClick={() => handleCopy(accCode, `ord-acc-${sub.id}`)}
-                                className="text-gray-500 hover:text-white p-0.5"
-                                data-tooltip="Copiar código de cuenta"
-                              >
-                                {copiedKey === `ord-acc-${sub.id}` ? (
-                                  <Check className="w-3 h-3 text-emerald-400" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
-                                )}
-                              </button>
-                              <button
-                                onClick={() => handleSendSubscriptionWhatsApp(sub, viewingOrder)}
-                                className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors"
-                                data-tooltip="Enviar accesos y normas por WhatsApp"
-                                title="Enviar accesos y normas por WhatsApp"
-                              >
-                                <Phone className="w-3.5 h-3.5" />
-                              </button>
-                              <span className="font-bold text-white text-xs">
-                                {sub.plan?.service?.nombre} ({sub.plan?.nombrePlan})
-                              </span>
-                              {acc?.estado && (
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${
-                                    acc.estado === 'DISPONIBLE'
-                                      ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/50'
-                                      : acc.estado === 'OCUPADA'
-                                      ? 'bg-blue-950/60 text-blue-400 border-blue-800/50'
-                                      : acc.estado === 'DEFECTUOSA'
-                                      ? 'bg-rose-950/60 text-rose-400 border-rose-800/50'
-                                      : 'bg-red-950/60 text-red-400 border-red-800/50'
-                                  }`}
-                                >
-                                  Inv: {acc.estado}
+                          {copiedKey === `copy-all-admin-${viewingOrder.id}` ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>¡Accesos Copiados!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copiar Todo el Acceso</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Lista de Cuentas Entregadas */}
+                    <div className="space-y-3">
+                      {viewingOrder.subscriptions.map((sub: any) => {
+                        const acc = sub.account || sub.credenciales;
+                        const isPwdShown = revealedPasswords[sub.id];
+                        const accCode = `#ACC-${(acc?.id || sub.accountId || '').substring(0, 8).toUpperCase()}`;
+                        const pin = acc?.pinPerfil;
+
+                        return (
+                          <div
+                            key={sub.id}
+                            className="bg-gray-950/90 border border-emerald-900/50 hover:border-emerald-600/60 rounded-xl p-3.5 space-y-3 transition-all shadow-inner"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-850">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="px-2 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-mono text-[11px] font-bold">
+                                  {accCode}
                                 </span>
-                              )}
+                                <span className="font-extrabold text-white text-xs sm:text-sm">
+                                  {sub.plan?.service?.nombre} — <span className="text-emerald-400 font-semibold">{sub.plan?.nombrePlan}</span>
+                                </span>
+                                {acc?.estado && (
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                                      acc.estado === 'DISPONIBLE'
+                                        ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/50'
+                                        : acc.estado === 'OCUPADA'
+                                        ? 'bg-blue-950/60 text-blue-400 border-blue-800/50'
+                                        : acc.estado === 'DEFECTUOSA'
+                                        ? 'bg-rose-950/60 text-rose-400 border-rose-800/50'
+                                        : 'bg-red-950/60 text-red-400 border-red-800/50'
+                                    }`}
+                                  >
+                                    Inv: {acc.estado}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendSubscriptionWhatsApp(sub, viewingOrder)}
+                                  className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/80 hover:border-emerald-700 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
+                                  title="Enviar accesos completos y normas por WhatsApp"
+                                >
+                                  <Phone className="w-3 h-3 text-emerald-400" />
+                                  <span>Enviar WhatsApp</span>
+                                </button>
+
+                                {acc?.id && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-gray-400">Estado:</span>
+                                    <select
+                                      value={acc.estado || 'OCUPADA'}
+                                      onChange={async (e) => {
+                                        const newStatus = e.target.value;
+                                        try {
+                                          setAccountActionLoading(acc.id);
+                                          await api.patch(`/accounts/${acc.id}`, { estado: newStatus });
+                                          acc.estado = newStatus;
+                                          setViewingOrder({ ...viewingOrder });
+                                          fetchOrders();
+                                        } catch (err: any) {
+                                          alert(err.response?.data?.message || 'Error al actualizar estado de la cuenta');
+                                        } finally {
+                                          setAccountActionLoading(null);
+                                        }
+                                      }}
+                                      disabled={accountActionLoading === acc.id}
+                                      className="bg-gray-950 border border-gray-700 text-[11px] text-gray-300 rounded-lg px-2 py-0.5 focus:outline-none focus:border-red-600 cursor-pointer"
+                                      title="Cambiar estado en inventario"
+                                    >
+                                      <option value="OCUPADA">Ocupada</option>
+                                      <option value="BLOQUEADA">Bloquear</option>
+                                      <option value="DEFECTUOSA">Defectuosa</option>
+                                      <option value="DISPONIBLE">Disponible</option>
+                                      <option value="VENCIDA">Vencida</option>
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
                             </div>
 
-                            <p className="font-mono text-[11px] text-gray-300">
-                              Correo: <strong className="text-white">{acc?.emailCuenta || 'N/A'}</strong>
-                              {acc?.perfilAsignado ? ` | Perfil: ${acc.perfilAsignado}` : ''}
-                              {acc?.pinPerfil ? ` | PIN: ${acc.pinPerfil}` : ''}
-                            </p>
+                            {/* Filas de Credenciales: Correo, Clave, Perfil, PIN */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                              {/* Correo / Usuario */}
+                              <div className="bg-gray-900/90 border border-gray-800 rounded-lg p-2.5 space-y-1">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                  Correo / Usuario
+                                </span>
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="font-mono text-white font-medium text-[11px] truncate select-all">
+                                    {acc?.emailCuenta || 'N/A'}
+                                  </span>
+                                  {acc?.emailCuenta && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopy(acc.emailCuenta, `copy-adm-email-${sub.id}`)}
+                                      className="p-1 rounded bg-gray-950 hover:bg-gray-800 text-gray-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                                      title="Copiar correo"
+                                    >
+                                      {copiedKey === `copy-adm-email-${sub.id}` ? (
+                                        <Check className="w-3 h-3 text-emerald-400" />
+                                      ) : (
+                                        <Copy className="w-3 h-3" />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Contraseña */}
+                              <div className="bg-gray-900/90 border border-gray-800 rounded-lg p-2.5 space-y-1">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                  Contraseña
+                                </span>
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="font-mono text-emerald-400 font-bold text-[11px] truncate select-all">
+                                    {acc?.passwordCuenta
+                                      ? isPwdShown
+                                        ? acc.passwordCuenta
+                                        : '••••••••••••'
+                                      : '••••••••••••'}
+                                  </span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => togglePassword(sub.id)}
+                                      className="p-1 rounded bg-gray-950 hover:bg-gray-800 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                                      title={isPwdShown ? 'Ocultar contraseña' : 'Ver contraseña'}
+                                    >
+                                      {isPwdShown ? <EyeOff className="w-3 h-3 text-amber-400" /> : <Eye className="w-3 h-3" />}
+                                    </button>
+                                    {acc?.passwordCuenta && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopy(acc.passwordCuenta, `copy-adm-pwd-${sub.id}`)}
+                                        className="p-1 rounded bg-gray-950 hover:bg-gray-800 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                                        title="Copiar contraseña"
+                                      >
+                                        {copiedKey === `copy-adm-pwd-${sub.id}` ? (
+                                          <Check className="w-3 h-3 text-emerald-400" />
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Perfil Asignado */}
+                              <div className="bg-gray-900/90 border border-gray-800 rounded-lg p-2.5 space-y-1">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                  Perfil Asignado
+                                </span>
+                                <p className="font-bold text-indigo-300 text-[11px] truncate">
+                                  {acc?.perfilAsignado || 'Perfil Principal'}
+                                </p>
+                              </div>
+
+                              {/* PIN de Acceso */}
+                              <div className="bg-gray-900/90 border border-gray-800 rounded-lg p-2.5 space-y-1">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                  PIN de Perfil
+                                </span>
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="font-mono text-amber-400 font-extrabold text-[11px]">
+                                    {pin ? pin : 'Sin PIN'}
+                                  </span>
+                                  {pin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopy(pin, `copy-adm-pin-${sub.id}`)}
+                                      className="p-1 rounded bg-gray-950 hover:bg-gray-800 text-gray-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                                      title="Copiar PIN"
+                                    >
+                                      {copiedKey === `copy-adm-pin-${sub.id}` ? (
+                                        <Check className="w-3 h-3 text-emerald-400" />
+                                      ) : (
+                                        <Copy className="w-3 h-3" />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Vigencia de la Suscripción */}
                             {sub.fechaVencimiento && (() => {
                               const hoy = new Date();
                               hoy.setHours(0, 0, 0, 0);
                               const venc = new Date(sub.fechaVencimiento);
                               const diasRestantes = Math.ceil((new Date(venc).setHours(0, 0, 0, 0) - hoy.getTime()) / (1000 * 60 * 60 * 24));
                               return (
-                                <div className="flex items-center gap-2 pt-1 text-[11px]">
+                                <div className="flex items-center justify-between pt-1 text-[11px] border-t border-gray-850/60">
                                   <span className="text-gray-400">
                                     Vence: <strong className="text-indigo-300 font-mono">{venc.toLocaleDateString('es-CO')}</strong>
                                   </span>
@@ -1381,56 +1457,152 @@ export default function OrdersPage() {
                               );
                             })()}
                           </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : viewingOrder.estado === 'PENDIENTE' ? (
+                  <div className="bg-gradient-to-r from-amber-950/60 via-gray-900 to-amber-950/60 border border-amber-500/50 rounded-2xl p-4 text-xs">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
+                        <Clock className="w-4 h-4 animate-spin" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white uppercase tracking-wider">
+                          Pago Pendiente de Verificación
+                        </h4>
+                        <p className="text-xs text-amber-200/90 mt-1 leading-relaxed">
+                          Al inspeccionar el comprobante y aprobar este pedido, las credenciales del inventario serán asignadas automáticamente y <strong>aparecerán aquí en la parte superior</strong> para visualización y despacho inmediato por WhatsApp.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
-                          {/* Acciones Rápidas sobre la Cuenta de Inventario & WhatsApp */}
-                          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 flex-wrap">
-                            <button
-                              onClick={() => handleSendSubscriptionWhatsApp(sub, viewingOrder)}
-                              data-tooltip="Enviar accesos completos y normas de uso por WhatsApp"
-                              className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-800/80 hover:border-emerald-700 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
-                            >
-                              <Phone className="w-3 h-3 text-emerald-400" />
-                              <span>Enviar WhatsApp</span>
-                            </button>
+                {/* ========================================================================= */}
+                {/* SECCIÓN 2: INFORMACIÓN CONSOLIDADA DE VENTA, CLIENTE Y PAGO (SIN DUPLICADOS) */}
+                {/* ========================================================================= */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  {/* Datos del Cliente */}
+                  <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3.5 space-y-2">
+                    <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Datos del Cliente</span>
+                    </p>
+                    <div>
+                      <p className="text-white font-bold text-sm">{viewingOrder.customer?.user?.nombre || 'Cliente'}</p>
+                      <p className="text-gray-400 text-[11px] truncate">{viewingOrder.customer?.user?.email}</p>
+                    </div>
+                    {viewingOrder.customer?.whatsapp && (
+                      <a
+                        href={`https://wa.me/${viewingOrder.customer.whatsapp.replace(/[^0-9]/g, '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        data-tooltip="WhatsApp"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-800/40 text-emerald-400 rounded-lg font-mono text-[11px] transition-colors"
+                      >
+                        <Phone className="w-3 h-3" />
+                        <span>{viewingOrder.customer.whatsapp}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
 
-                            {acc?.id && (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-gray-400">Estado:</span>
-                                <select
-                                  value={acc.estado || 'OCUPADA'}
-                                  onChange={async (e) => {
-                                    const newStatus = e.target.value;
-                                    try {
-                                      setAccountActionLoading(acc.id);
-                                      await api.patch(`/accounts/${acc.id}`, { estado: newStatus });
-                                      acc.estado = newStatus;
-                                      setViewingOrder({ ...viewingOrder });
-                                      fetchOrders();
-                                    } catch (err: any) {
-                                      alert(err.response?.data?.message || 'Error al actualizar estado de la cuenta');
-                                    } finally {
-                                      setAccountActionLoading(null);
-                                    }
-                                  }}
-                                  disabled={accountActionLoading === acc.id}
-                                  className="bg-gray-950 border border-gray-700 text-[11px] text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-red-600 cursor-pointer"
-                                  title="Cambiar estado en inventario (Suspender/Bloquear/Defectuosa/Disponible)"
-                                >
-                                  <option value="OCUPADA">Ocupada</option>
-                                  <option value="BLOQUEADA">Bloquear</option>
-                                  <option value="DEFECTUOSA">Defectuosa</option>
-                                  <option value="DISPONIBLE">Disponible</option>
-                                  <option value="VENCIDA">Vencida</option>
-                                </select>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                  {/* Información de la Venta & Vendedor */}
+                  <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3.5 space-y-2">
+                    <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Canal y Vendedor</span>
+                    </p>
+                    <div>
+                      <span className="text-gray-400 block text-[10px]">Vendedor Asignado:</span>
+                      <span className="text-white font-bold text-xs block truncate">
+                        {viewingOrder.vendedorNombre || viewingOrder.vendedor?.nombre || 'Venta Online Directa'}
+                      </span>
+                    </div>
+                    {viewingOrder.vendedorComision ? (
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Comisión Vendedor:</span>
+                        <span className="font-bold text-emerald-400 font-mono text-xs">
+                          +{formatCOP(viewingOrder.vendedorComision)} ({viewingOrder.vendedorPorcentaje}%)
+                        </span>
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Canal Oficial:</span>
+                        <span className="text-gray-300 text-xs">Plataforma Web Directa</span>
+                      </div>
+                    )}
+                    {viewingOrder.descripcionVenta && (
+                      <div className="pt-1 border-t border-gray-850">
+                        <span className="text-gray-400 block text-[10px]">Nota / Tipo:</span>
+                        <p className="text-[11px] text-gray-200 font-mono truncate">
+                          {viewingOrder.descripcionVenta}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Resumen de Pago y Estado (Fecha unificada) */}
+                  <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3.5 space-y-2">
+                    <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Pago y Registro</span>
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Total:</span>
+                      <span className="text-emerald-400 font-extrabold text-sm">{formatCOP(viewingOrder.total)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Método:</span>
+                      <span className="text-white font-medium">{viewingOrder.metodoPago || 'Nequi / Bancolombia'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Registro:</span>
+                      <span className="text-gray-300 font-mono text-[11px]">
+                        {new Date(viewingOrder.createdAt).toLocaleString('es-CO', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              )}
+
+                {/* ========================================================================= */}
+                {/* SECCIÓN 3: PLANES Y SERVICIOS SOLICITADOS */}
+                {/* ========================================================================= */}
+                <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3.5 space-y-2.5 text-xs">
+                  <p className="font-semibold text-white text-[11px] uppercase tracking-wider text-gray-400">
+                    Planes y Servicios Solicitados
+                  </p>
+                  <div className="divide-y divide-gray-850">
+                    {viewingOrder.items?.map((it: any) => (
+                      <div key={it.id} className="py-2 flex items-center justify-between first:pt-0 last:pb-0">
+                        <div>
+                          <p className="font-medium text-white">
+                            {it.plan?.service?.nombre} - {it.plan?.nombrePlan}
+                          </p>
+                          <p className="text-[11px] text-gray-400">
+                            {it.cantidad} unidad(es) × {formatCOP(it.precioUnitario)}
+                          </p>
+                        </div>
+                        <p className="font-bold text-white text-sm">
+                          {formatCOP(Number(it.precioUnitario) * Number(it.cantidad))}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-2 border-t border-gray-800 flex justify-between items-center">
+                    <span className="font-bold text-white">Total de la Orden:</span>
+                    <span className="font-extrabold text-base text-emerald-400">
+                      {formatCOP(viewingOrder.total)}
+                    </span>
+                  </div>
+                </div>
 
               {/* SECCIÓN DE COMPROBANTE DE PAGO (REQUERIDO PARA PAGOS ELECTRÓNICOS) */}
               <div className="bg-gray-950/70 border border-gray-800 rounded-xl p-3.5 space-y-3">
@@ -3010,6 +3182,32 @@ export default function OrdersPage() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
+                    {(s.accountId || s.accountCode) && (
+                      <div className="flex items-center justify-between bg-gray-900 px-2.5 py-1.5 rounded-lg border border-gray-800 sm:col-span-2">
+                        <span className="text-gray-400 font-sans font-semibold text-[10px] uppercase">ID Cuenta:</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-amber-300 font-bold px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-800/60 text-[10px]">
+                            {s.accountCode || `#ACC-${s.accountId.substring(0, 8).toUpperCase()}`}
+                          </span>
+                          {s.accountId && (
+                            <span className="text-[10px] text-gray-500 font-mono hidden sm:inline" title={s.accountId}>
+                              ({s.accountId})
+                            </span>
+                          )}
+                          {s.accountId && (
+                            <button
+                              onClick={() => handleCopy(s.accountId, `sale-acc-${idx}`)}
+                              className="text-gray-400 hover:text-white p-0.5"
+                              data-tooltip="Copiar ID de cuenta"
+                              title="Copiar ID de cuenta"
+                            >
+                              {copiedKey === `sale-acc-${idx}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between bg-gray-900 px-2.5 py-1.5 rounded-lg border border-gray-800">
                       <span className="text-gray-400">Email:</span>
                       <div className="flex items-center gap-1.5">
@@ -3066,7 +3264,7 @@ export default function OrdersPage() {
                       saleSuccessData.suscripciones
                         ?.map(
                           (s: any) =>
-                            `🎬 *${s.servicio}* (${s.plan})\n📧 *Correo:* ${s.emailCuenta}\n🔑 *Contraseña:* ${s.passwordCuenta}${
+                            `🎬 *${s.servicio}* (${s.plan})\n${(s.accountCode || s.accountId) ? `🆔 *ID Cuenta:* ${s.accountCode || `#ACC-${s.accountId.substring(0, 8).toUpperCase()}`}\n` : ''}📧 *Correo:* ${s.emailCuenta}\n🔑 *Contraseña:* ${s.passwordCuenta}${
                               s.perfilAsignado ? `\n👤 *Perfil:* ${s.perfilAsignado}` : ''
                             }${s.pinPerfil ? `\n🔒 *PIN:* ${s.pinPerfil}` : ''}\n📅 *Vence:* ${new Date(s.fechaVencimiento).toLocaleDateString('es-CO')}`,
                         )

@@ -105,8 +105,11 @@ export default function SalesAccountsPage() {
   const handleCopyFullAccess = (sub: any) => {
     const cred = sub.credenciales;
     if (!cred?.email) return;
+    const accId = sub.accountId || sub.credenciales?.id || sub.id;
+    const accCode = `#ACC-${accId.substring(0, 8).toUpperCase()}`;
     const msg = [
       `🎬 *${sub.plataforma}* — ${sub.planNombre}`,
+      `🆔 *ID Cuenta:* ${accCode} (${accId})`,
       ``,
       `📧 *Correo:* ${cred.email}`,
       `🔑 *Contraseña:* ${cred.password || 'N/A'}`,
@@ -142,10 +145,13 @@ export default function SalesAccountsPage() {
       return;
     }
 
+    const accId = sub.accountId || sub.credenciales?.id || sub.id;
+    const accCode = `#ACC-${accId.substring(0, 8).toUpperCase()}`;
     const msg = [
       `Hola *${sub.cliente?.nombre || 'Estimado Cliente'}* 👋, aquí tienes los detalles de acceso y credenciales de tu servicio:`,
       ``,
       `🎬 *${sub.plataforma}* — ${sub.planNombre}`,
+      `🆔 *ID Cuenta:* ${accCode} (${accId})`,
       ``,
       `📧 *Correo:* ${cred.email}`,
       `🔑 *Contraseña:* ${cred.password || 'N/A'}`,
@@ -317,6 +323,11 @@ export default function SalesAccountsPage() {
       format: (val) => (val ? `$${Number(val).toLocaleString('es-CO')}` : '$0'),
     },
     {
+      key: 'accountId',
+      label: 'ID Cuenta Inventario',
+      format: (_, row) => `#ACC-${(row.accountId || row.credenciales?.id || row.id).substring(0, 8).toUpperCase()} (${row.accountId || row.credenciales?.id || row.id})`,
+    },
+    {
       key: 'emailCuenta',
       label: 'Email Cuenta',
       format: (_, row) => row.credenciales?.email || '',
@@ -360,7 +371,14 @@ export default function SalesAccountsPage() {
         { key: 'fechaInicio', label: 'Fecha Venta', format: (v) => new Date(v).toLocaleString('es-CO') },
         { key: 'diasRestantes', label: 'Días Rest.', format: (d) => `${d}d` },
         { key: 'precio', label: 'Precio', format: (p) => `$${Number(p).toLocaleString('es-CO')}` },
-        { key: 'credenciales', label: 'Credencial', format: (_, r) => r.credenciales?.email || '-' },
+        {
+          key: 'credenciales',
+          label: 'ID Cuenta & Credencial',
+          format: (_, r) => {
+            const accCode = `#ACC-${(r.accountId || r.credenciales?.id || r.id).substring(0, 8).toUpperCase()}`;
+            return `${accCode} - ${r.credenciales?.email || '-'}`;
+          },
+        },
         { key: 'estado', label: 'Estado' },
       ],
       rows: filteredSubscriptions,
@@ -698,14 +716,23 @@ export default function SalesAccountsPage() {
                         {sub.credenciales?.email ? (
                           <div className="space-y-1 max-w-[200px]">
                             {/* Código Único de la Cuenta */}
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-mono text-[10px] font-bold">
+                            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                              <span
+                                className="px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-mono text-[10px] font-bold"
+                                title={`ID Cuenta Completo: ${sub.accountId || sub.credenciales?.id || sub.id}`}
+                              >
                                 #ACC-{(sub.accountId || sub.credenciales?.id || sub.id).substring(0, 8).toUpperCase()}
                               </span>
+                              {(sub.accountId || sub.credenciales?.id) && (
+                                <span className="text-[9px] text-gray-500 font-mono hidden sm:inline" title={sub.accountId || sub.credenciales?.id}>
+                                  ({(sub.accountId || sub.credenciales?.id).substring(0, 13)}...)
+                                </span>
+                              )}
                               <button
-                                onClick={() => handleCopy(`#ACC-${(sub.accountId || sub.credenciales?.id || sub.id).substring(0, 8).toUpperCase()}`, `code-${sub.id}`)}
+                                onClick={() => handleCopy(sub.accountId || sub.credenciales?.id || `#ACC-${sub.id.substring(0, 8).toUpperCase()}`, `code-${sub.id}`)}
                                 className="text-gray-500 hover:text-white shrink-0 p-0.5"
-                                data-tooltip="Copiar código de cuenta"
+                                data-tooltip="Copiar ID de cuenta"
+                                title="Copiar ID de cuenta"
                               >
                                 {copiedId === `code-${sub.id}` ? (
                                   <Check className="w-3 h-3 text-emerald-400" />

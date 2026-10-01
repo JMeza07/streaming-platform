@@ -25,6 +25,12 @@ import {
   Download,
   Ban,
   CheckCircle,
+  Layers,
+  ShieldAlert,
+  KeyRound,
+  Building2,
+  Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import { useDialog } from '@/components/Dialog';
@@ -50,11 +56,40 @@ export default function InventoryPage() {
 
   const isAdmin = currentUser?.rol === 'ADMIN';
 
+  // Pestañas: 'accounts' | 'root_accounts' | 'providers'
+  const [activeTab, setActiveTab] = useState<'accounts' | 'root_accounts' | 'providers'>('accounts');
+  const [rootAccounts, setRootAccounts] = useState<any[]>([]);
+  const [providers, setProviders] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+
   // Modales
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<any | null>(null);
   const [accountToDelete, setAccountToDelete] = useState<any | null>(null);
+
+  // Modales Cuentas Raíz & Proveedores
+  const [showAddRootModal, setShowAddRootModal] = useState(false);
+  const [newRootAccount, setNewRootAccount] = useState({
+    email: '',
+    password: '',
+    serviceId: '',
+    providerId: '',
+    fechaVencimientoRaiz: '',
+    maxPantallas: 5,
+  });
+
+  const [showAddProviderModal, setShowAddProviderModal] = useState(false);
+  const [newProvider, setNewProvider] = useState({
+    name: '',
+    contactPhone: '',
+    contactEmail: '',
+    notes: '',
+  });
+
+  const [rotatingAccount, setRotatingAccount] = useState<any | null>(null);
+  const [newPasswordValue, setNewPasswordValue] = useState('');
+  const [optimizingInventory, setOptimizingInventory] = useState(false);
 
   // Estados de formularios
   const [newAccount, setNewAccount] = useState({
@@ -90,12 +125,18 @@ export default function InventoryPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [accRes, planRes] = await Promise.all([
+      const [accRes, planRes, rootRes, provRes, srvRes] = await Promise.all([
         api.get('/accounts'),
         api.get('/plans'),
+        api.get('/accounts/root-accounts').catch(() => ({ data: [] })),
+        api.get('/accounts/providers').catch(() => ({ data: [] })),
+        api.get('/services').catch(() => ({ data: [] })),
       ]);
-      setAccounts(accRes.data);
-      setPlans(planRes.data);
+      setAccounts(accRes.data || []);
+      setPlans(planRes.data || []);
+      setRootAccounts(rootRes.data || []);
+      setProviders(provRes.data || []);
+      setServices(srvRes.data || []);
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -106,6 +147,133 @@ export default function InventoryPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Handlers Cuentas Raíz (Escenarios 2, 3, 5, 10, 11)
+  const handleMarkRootDown = async (rootAcc: any) => {
+    const ok = await confirm(
+      `¿Marcar cuenta raíz ${rootAcc.email} como CAÍDA? Se congelarán los días pendientes de los clientes asociados y se activará la cascada de garantía / cola de reemplazo prioritario (Escenario 2).`,
+      { type: 'danger', title: 'Marcar Cuenta Raíz Caída', confirmText: 'Sí, marcar caída' }
+    );
+    if (!ok) return;
+    try {
+      setLoading(true);
+      await api.patch(`/accounts/root-accounts/${rootAcc.id}/mark-down`, { motivo: 'Fallo general / bloqueo por proveedor' });
+      setSuccessMsg(`Cuenta raíz ${rootAcc.email} marcada como CAÍDA y días de clientes congelados.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchData();
+    } catch (err: any) {
+      await alert(err.response?.data?.message || 'Error al marcar cuenta caída', { type: 'error', title: 'Error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRotatePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rotatingAccount || !newPasswordValue.trim()) return;
+    try {
+      setFormLoading(true);
+      await api.patch(`/accounts/root-accounts/${rotatingAccount.id}/password`, {
+        newPassword: newPasswordValue.trim(),
+      });
+      setSuccessMsg(`Contraseña rotada para ${rotatingAccount.email}. Notificación enviada por WhatsApp exclusivamente a clientes activos legítimos (Escenarios 3 y 5).`);
+      setTimeout(() => setSuccessMsg(''), 5000);
+      setRotatingAccount(null);
+      setNewPasswordValue('');
+      fetchData();
+    } catch (err: any) {
+      await alert(err.response?.data?.message || 'Error al rotar contraseña', { type: 'error', title: 'Error' });
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleConfirmRotation = async (rootAcc: any) => {
+    try {
+      setLoading(true);
+      await api.patch(`/accounts/root-accounts/${rootAcc.id}/confirm-rotation`);
+      setSuccessMsg(`Rotación confirmada para ${rootAcc.email}. Los perfiles en cuarentena han sido liberados (Escenario 11).`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchData();
+    } catch (err: any) {
+      await alert(err.response?.data?.message || 'Error al confirmar rotación', { type: 'error', title: 'Error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOptimizeInventory = async () => {
+    const ok = await confirm(
+      '¿Ejecutar algoritmo de Bin Packing para consolidar clientes en cuentas de alta ocupación y marcar cuentas vacías como NO_RENOVAR? (Escenario 10)',
+      { type: 'confirm', title: 'Optimizar Inventario (Bin Packing)', confirmText: 'Ejecutar Optimización' }
+    );
+    if (!ok) return;
+    try {
+      setOptimizingInventory(true);
+      const res = await api.post('/accounts/optimize-inventory');
+      setSuccessMsg(res.data?.message || 'Optimización de inventario completada exitosamente.');
+      setTimeout(() => setSuccessMsg(''), 5000);
+      fetchData();
+    } catch (err: any) {
+      await alert(err.response?.data?.message || 'Error al optimizar inventario', { type: 'error', title: 'Error' });
+    } finally {
+      setOptimizingInventory(false);
+    }
+  };
+
+  const handleCreateRootAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setFormLoading(true);
+      await api.post('/accounts/root-accounts', newRootAccount);
+      setShowAddRootModal(false);
+      setNewRootAccount({ email: '', password: '', serviceId: '', providerId: '', fechaVencimientoRaiz: '', maxPantallas: 5 });
+      setSuccessMsg('Cuenta Raíz agregada exitosamente.');
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchData();
+    } catch (err: any) {
+      setFormError(err.response?.data?.message || 'Error al crear cuenta raíz');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  // Handlers Proveedores (Escenario 9)
+  const handleMarkProviderDown = async (prov: any) => {
+    const ok = await confirm(
+      `¿Marcar al proveedor "${prov.name}" como CAÍDO? Todas sus cuentas raíz asociadas se marcarán como CAÍDAS, se congelarán los días de los clientes y se creará un ticket maestro de incidencia (Escenario 9).`,
+      { type: 'danger', title: 'Caída Masiva de Proveedor', confirmText: 'Confirmar Caída Masiva' }
+    );
+    if (!ok) return;
+    try {
+      setLoading(true);
+      await api.patch(`/accounts/providers/${prov.id}/mark-down`, { motivo: 'Caída masiva reportada por el proveedor' });
+      setSuccessMsg(`Proveedor ${prov.name} marcado como CAÍDO. Cuentas y clientes asociados congelados.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchData();
+    } catch (err: any) {
+      await alert(err.response?.data?.message || 'Error al marcar proveedor caído', { type: 'error', title: 'Error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateProvider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setFormLoading(true);
+      await api.post('/accounts/providers', newProvider);
+      setShowAddProviderModal(false);
+      setNewProvider({ name: '', contactPhone: '', contactEmail: '', notes: '' });
+      setSuccessMsg('Proveedor registrado exitosamente.');
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchData();
+    } catch (err: any) {
+      setFormError(err.response?.data?.message || 'Error al crear proveedor');
+    } finally {
+      setFormLoading(false);
+    }
+  };
 
   const openEditModal = (acc: any) => {
     setEditingAccount(acc);
@@ -132,9 +300,10 @@ export default function InventoryPage() {
         perfilAsignado: editAccountForm.perfilAsignado || null,
         pinPerfil: editAccountForm.pinPerfil || null,
       });
+      const accCode = `#ACC-${editingAccount.id.substring(0, 8).toUpperCase()}`;
       setEditingAccount(null);
-      setSuccessMsg('¡Cuenta actualizada exitosamente!');
-      setTimeout(() => setSuccessMsg(''), 3000);
+      setSuccessMsg(`¡Cuenta ${accCode} (ID: ${editingAccount.id}) actualizada exitosamente!`);
+      setTimeout(() => setSuccessMsg(''), 4000);
       fetchData();
     } catch (err: any) {
       setFormError(err.response?.data?.message || 'Error al actualizar la cuenta');
@@ -146,11 +315,13 @@ export default function InventoryPage() {
   const handleDeleteAccount = async () => {
     if (!accountToDelete) return;
     setFormLoading(true);
+    const deletedId = accountToDelete.id;
+    const deletedCode = `#ACC-${deletedId.substring(0, 8).toUpperCase()}`;
     try {
       await api.delete(`/accounts/${accountToDelete.id}`);
       setAccountToDelete(null);
-      setSuccessMsg('¡Cuenta eliminada exitosamente!');
-      setTimeout(() => setSuccessMsg(''), 3000);
+      setSuccessMsg(`¡Cuenta ${deletedCode} (ID: ${deletedId}) eliminada exitosamente!`);
+      setTimeout(() => setSuccessMsg(''), 4000);
       fetchData();
     } catch (err: any) {
       await alert(err.response?.data?.message || 'Error al eliminar la cuenta', { type: 'error', title: 'Error al Eliminar' });
@@ -175,15 +346,17 @@ export default function InventoryPage() {
     setFormError('');
 
     try {
-      await api.post('/accounts', {
+      const createdRes = await api.post('/accounts', {
         ...newAccount,
         perfilAsignado: newAccount.perfilAsignado || undefined,
         pinPerfil: newAccount.pinPerfil || undefined,
       });
       setShowAddModal(false);
+      const accId = createdRes.data?.id;
+      const accCode = accId ? `#ACC-${accId.substring(0, 8).toUpperCase()}` : '';
       setNewAccount({ planId: '', emailCuenta: '', passwordCuenta: '', perfilAsignado: '', pinPerfil: '' });
-      setSuccessMsg('¡Cuenta agregada exitosamente!');
-      setTimeout(() => setSuccessMsg(''), 3000);
+      setSuccessMsg(`¡Cuenta ${accCode} (ID: ${accId}) agregada exitosamente al inventario!`);
+      setTimeout(() => setSuccessMsg(''), 4000);
       fetchData();
     } catch (err: any) {
       setFormError(err.response?.data?.message || 'Error al crear la cuenta');
@@ -309,13 +482,14 @@ export default function InventoryPage() {
   const handleToggleBlockAccount = async (acc: any) => {
     const isBlocked = acc.estado === 'BLOQUEADA';
     const nextStatus = isBlocked ? 'DISPONIBLE' : 'BLOQUEADA';
+    const accCode = `#ACC-${acc.id.substring(0, 8).toUpperCase()}`;
     const confirmMsg = isBlocked
-      ? '¿Reactivar esta cuenta y dejarla DISPONIBLE en inventario?'
-      : '¿BLOQUEAR / SUSPENDER esta cuenta para evitar que sea entregada o usada?';
+      ? `¿Reactivar la cuenta ${accCode} (ID: ${acc.id}) y dejarla DISPONIBLE en inventario?`
+      : `¿BLOQUEAR / SUSPENDER la cuenta ${accCode} (ID: ${acc.id}) para evitar que sea entregada o usada?`;
 
     const ok = await confirm(confirmMsg, {
       type: isBlocked ? 'confirm' : 'danger',
-      title: isBlocked ? 'Reactivar Cuenta' : 'Bloquear Cuenta',
+      title: isBlocked ? `Reactivar Cuenta ${accCode}` : `Bloquear Cuenta ${accCode}`,
       confirmText: isBlocked ? 'Sí, reactivar' : 'Sí, bloquear',
     });
     if (!ok) return;
@@ -325,8 +499,8 @@ export default function InventoryPage() {
       setAccounts((prev) =>
         prev.map((a) => (a.id === acc.id ? { ...a, estado: nextStatus } : a))
       );
-      setSuccessMsg(`Cuenta ${isBlocked ? 'reactivada' : 'bloqueada'} exitosamente`);
-      setTimeout(() => setSuccessMsg(''), 3000);
+      setSuccessMsg(`Cuenta ${accCode} (ID: ${acc.id}) ${isBlocked ? 'reactivada' : 'bloqueada'} exitosamente`);
+      setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
       await alert(err.response?.data?.message || 'Error al cambiar estado de la cuenta', { type: 'error', title: 'Error de Estado' });
     }
@@ -394,20 +568,62 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Filtros y Buscador */}
-      <div className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 backdrop-blur-md flex flex-col md:flex-row gap-3 items-center justify-between">
-        <div className="relative w-full md:w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-          <input
-            type="text"
-            placeholder="Buscar por correo o servicio..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-gray-950/80 border border-gray-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-600"
-          />
-        </div>
+      {/* Selector de Pestañas */}
+      <div className="flex items-center gap-2 border-b border-gray-800 pb-3">
+        <button
+          onClick={() => setActiveTab('accounts')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'accounts'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+              : 'bg-gray-900/60 text-gray-400 hover:text-white border border-gray-800'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>Perfiles de Entrega ({accounts.length})</span>
+        </button>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <button
+          onClick={() => setActiveTab('root_accounts')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'root_accounts'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+              : 'bg-gray-900/60 text-gray-400 hover:text-white border border-gray-800'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>Cuentas Raíz ({rootAccounts.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('providers')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'providers'
+              ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20'
+              : 'bg-gray-900/60 text-gray-400 hover:text-white border border-gray-800'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Proveedores ({providers.length})</span>
+        </button>
+      </div>
+
+      {/* PESTAÑA 1: PERFILES DE ENTREGA */}
+      {activeTab === 'accounts' && (
+        <div className="space-y-6">
+          {/* Filtros y Buscador */}
+          <div className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 backdrop-blur-md flex flex-col md:flex-row gap-3 items-center justify-between">
+            <div className="relative w-full md:w-80">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Buscar por correo o servicio..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-gray-950/80 border border-gray-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-600"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto">
           {/* Filtro por estado */}
           <select
             value={statusFilter}
@@ -660,6 +876,460 @@ export default function InventoryPage() {
           onPageChange={setCurrentPage}
         />
       </div>
+      </div>
+      )}
+
+      {/* PESTAÑA 2: CUENTAS RAÍZ (MASTER ACCOUNTS) */}
+      {activeTab === 'root_accounts' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 backdrop-blur-md">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-400" />
+                <span>Gestión de Cuentas Maestras (Cuentas Raíz)</span>
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Cuentas contratadas a proveedores que alimentan perfiles individuales (Escenarios 2, 3, 5, 10, 11).
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={handleOptimizeInventory}
+                disabled={optimizingInventory}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-950/60 border border-indigo-700 hover:bg-indigo-900/60 text-indigo-200 text-xs font-semibold rounded-xl transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className={`w-3.5 h-3.5 text-indigo-400 ${optimizingInventory ? 'animate-spin' : ''}`} />
+                <span>{optimizingInventory ? 'Optimizando...' : 'Optimizar (Bin Packing)'}</span>
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setShowAddRootModal(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white rounded-xl shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Nueva Cuenta Raíz</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-gray-900/60 border border-gray-800/80 rounded-2xl overflow-hidden backdrop-blur-md">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-gray-300">
+                <thead className="bg-gray-950/80 border-b border-gray-800 text-gray-400 uppercase tracking-wider font-semibold text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">Correo Maestro</th>
+                    <th className="py-3 px-4">Servicio</th>
+                    <th className="py-3 px-4">Proveedor</th>
+                    <th className="py-3 px-4 text-center">Perfiles Activos / Max</th>
+                    <th className="py-3 px-4">Vencimiento Raíz</th>
+                    <th className="py-3 px-4 text-center">Estado</th>
+                    <th className="py-3 px-4 text-center">Seguridad</th>
+                    <th className="py-3 px-4 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/50">
+                  {rootAccounts.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-gray-500">
+                        No hay cuentas raíz registradas aún.
+                      </td>
+                    </tr>
+                  ) : (
+                    rootAccounts.map((ra) => {
+                      const activeProfiles = (ra.accounts || []).filter((a: any) => a.estado === 'OCUPADA').length;
+                      return (
+                        <tr key={ra.id} className="hover:bg-gray-800/30 transition-colors">
+                          <td className="py-3.5 px-4 font-mono font-medium text-white">{ra.email}</td>
+                          <td className="py-3.5 px-4">{ra.service?.nombre || 'General'}</td>
+                          <td className="py-3.5 px-4 font-semibold text-indigo-300">{ra.provider?.name || 'Interno / Sin Asignar'}</td>
+                          <td className="py-3.5 px-4 text-center">
+                            <span className="font-bold text-white">{activeProfiles}</span> / <span className="text-gray-400">{ra.maxPantallas}</span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {ra.fechaVencimientoRaiz ? new Date(ra.fechaVencimientoRaiz).toLocaleDateString() : 'N/A'}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              ra.status === 'ACTIVA' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                              ra.status === 'CAIDA' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                              ra.status === 'NO_RENOVAR' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                              'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                            }`}>
+                              {ra.status}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            {ra.requiresPasswordChange ? (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                                Rotación Requerida
+                              </span>
+                            ) : (
+                              <span className="text-emerald-400 text-[11px] font-medium flex items-center justify-center gap-1">
+                                <Check className="w-3.5 h-3.5" /> OK
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {ra.requiresPasswordChange && (
+                                <button
+                                  onClick={() => handleConfirmRotation(ra)}
+                                  className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-600/40 rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                                  title="Confirmar rotación realizada para liberar perfiles en cuarentena"
+                                >
+                                  Confirmar Rotación
+                                </button>
+                              )}
+                              <button
+                                onClick={() => { setRotatingAccount(ra); setNewPasswordValue(''); }}
+                                className="p-1.5 text-gray-400 hover:text-indigo-300 hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
+                                title="Rotar Contraseña y Notificar a Clientes Legítimos (Escenarios 3 y 5)"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              {ra.status !== 'CAIDA' && (
+                                <button
+                                  onClick={() => handleMarkRootDown(ra)}
+                                  className="p-1.5 text-gray-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                                  title="Marcar como Caída (Escenario 2 - Congelar clientes y cascada garantía)"
+                                >
+                                  <ShieldAlert className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PESTAÑA 3: PROVEEDORES */}
+      {activeTab === 'providers' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 backdrop-blur-md">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-amber-400" />
+                <span>Directorio de Proveedores Mayoristas</span>
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Control de proveedores y gestión de caídas masivas en cascada (Escenario 9).
+              </p>
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => setShowAddProviderModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-xs font-semibold text-white rounded-xl shadow-lg shadow-amber-600/20 transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nuevo Proveedor</span>
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {providers.length === 0 ? (
+              <div className="col-span-full py-8 text-center text-gray-500 bg-gray-900/40 rounded-2xl border border-gray-800/80">
+                No hay proveedores registrados aún.
+              </div>
+            ) : (
+              providers.map((p) => (
+                <div key={p.id} className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-white text-sm">{p.name}</h3>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      p.status === 'ACTIVO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                    }`}>
+                      {p.status}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-gray-300 space-y-1">
+                    {p.contactPhone && <div><span className="text-gray-500">Tel / WA:</span> {p.contactPhone}</div>}
+                    {p.contactEmail && <div><span className="text-gray-500">Email:</span> {p.contactEmail}</div>}
+                    {p.notes && <div className="text-[11px] text-gray-400 italic mt-1">{p.notes}</div>}
+                  </div>
+
+                  <div className="pt-2 border-t border-gray-800/80 flex items-center justify-between text-xs">
+                    <span className="text-gray-500">Cuentas vinculadas: <strong className="text-white">{p.rootAccounts?.length || 0}</strong></span>
+                    {p.status === 'ACTIVO' && (
+                      <button
+                        onClick={() => handleMarkProviderDown(p)}
+                        className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-600/40 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1"
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>Caída Masiva</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ROTAR CONTRASEÑA RAÍZ (Escenarios 3 y 5) */}
+      {rotatingAccount && (
+        <div className="fixed inset-0 z-[10010] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-900 border border-gray-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0 bg-gray-900/95">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-indigo-400" />
+                <span>Rotar Contraseña de Cuenta Raíz</span>
+              </h3>
+              <button onClick={() => setRotatingAccount(null)} className="text-gray-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRotatePasswordSubmit} className="p-5 space-y-4 text-xs">
+              <div className="p-3 bg-indigo-950/40 border border-indigo-800/40 rounded-xl text-indigo-200">
+                Cuenta: <strong className="text-white font-mono">{rotatingAccount.email}</strong>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Al guardar, se actualizará la contraseña maestra y se enviará la nueva clave por WhatsApp <strong>exclusivamente</strong> a los clientes activos y legítimos asociados.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Nueva Contraseña Maestra</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Netflix2026*Secure!"
+                  value={newPasswordValue}
+                  onChange={(e) => setNewPasswordValue(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600 font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRotatingAccount(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={formLoading}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Actualizar y Notificar</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: NUEVA CUENTA RAÍZ */}
+      {showAddRootModal && (
+        <div className="fixed inset-0 z-[10010] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-900 border border-gray-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0 bg-gray-900/95">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-400" />
+                <span>Registrar Nueva Cuenta Raíz</span>
+              </h3>
+              <button onClick={() => setShowAddRootModal(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateRootAccount} className="p-5 space-y-3.5 text-xs">
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Correo Maestro</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="ejemplo@proveedor.com"
+                  value={newRootAccount.email}
+                  onChange={(e) => setNewRootAccount({ ...newRootAccount, email: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Contraseña Maestra</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contraseña del correo/cuenta"
+                  value={newRootAccount.password}
+                  onChange={(e) => setNewRootAccount({ ...newRootAccount, password: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 font-semibold mb-1">Servicio</label>
+                  <select
+                    value={newRootAccount.serviceId}
+                    onChange={(e) => setNewRootAccount({ ...newRootAccount, serviceId: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  >
+                    <option value="">Selecciona servicio</option>
+                    {services.map((s) => (
+                      <option key={s.id} value={s.id}>{s.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 font-semibold mb-1">Proveedor Mayorista</label>
+                  <select
+                    value={newRootAccount.providerId}
+                    onChange={(e) => setNewRootAccount({ ...newRootAccount, providerId: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  >
+                    <option value="">Sin proveedor / Interno</option>
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 font-semibold mb-1">Vencimiento Raíz</label>
+                  <input
+                    type="date"
+                    required
+                    value={newRootAccount.fechaVencimientoRaiz}
+                    onChange={(e) => setNewRootAccount({ ...newRootAccount, fechaVencimientoRaiz: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 font-semibold mb-1">Pantallas Máximas</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    required
+                    value={newRootAccount.maxPantallas}
+                    onChange={(e) => setNewRootAccount({ ...newRootAccount, maxPantallas: parseInt(e.target.value) || 5 })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddRootModal(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={formLoading}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Guardar Cuenta Raíz</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: NUEVO PROVEEDOR (Escenario 9) */}
+      {showAddProviderModal && (
+        <div className="fixed inset-0 z-[10010] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-900 border border-gray-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0 bg-gray-900/95">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-amber-400" />
+                <span>Registrar Nuevo Proveedor</span>
+              </h3>
+              <button onClick={() => setShowAddProviderModal(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProvider} className="p-5 space-y-3.5 text-xs">
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Nombre Comercial</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: StreamingGlobal S.A."
+                  value={newProvider.name}
+                  onChange={(e) => setNewProvider({ ...newProvider, name: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">WhatsApp / Teléfono de Contacto</label>
+                <input
+                  type="text"
+                  placeholder="+57 300 000 0000"
+                  value={newProvider.contactPhone}
+                  onChange={(e) => setNewProvider({ ...newProvider, contactPhone: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Correo Electrónico</label>
+                <input
+                  type="email"
+                  placeholder="soporte@proveedor.com"
+                  value={newProvider.contactEmail}
+                  onChange={(e) => setNewProvider({ ...newProvider, contactEmail: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Notas / Políticas de Garantía</label>
+                <textarea
+                  rows={2}
+                  placeholder="Notas adicionales..."
+                  value={newProvider.notes}
+                  onChange={(e) => setNewProvider({ ...newProvider, notes: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddProviderModal(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={formLoading}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Guardar Proveedor</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: AGREGAR CUENTA */}
       {showAddModal && (
@@ -851,6 +1521,12 @@ export default function InventoryPage() {
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Pencil className="w-4 h-4 text-blue-400" />
                 <span>Editar Propiedades de la Cuenta</span>
+                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">
+                  #ACC-{editingAccount.id.substring(0, 8).toUpperCase()}
+                </span>
+                <span className="text-[10px] font-mono text-gray-500 hidden sm:inline">
+                  (ID: {editingAccount.id})
+                </span>
               </h3>
               <button onClick={() => setEditingAccount(null)} className="text-gray-400 hover:text-white cursor-pointer">
                 <X className="w-5 h-5" />
@@ -975,6 +1651,9 @@ export default function InventoryPage() {
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-red-500" />
                 <span>Confirmar Eliminación</span>
+                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-800/60">
+                  #ACC-{accountToDelete.id.substring(0, 8).toUpperCase()}
+                </span>
               </h3>
               <button onClick={() => setAccountToDelete(null)} className="text-gray-400 hover:text-white cursor-pointer">
                 <X className="w-5 h-5" />
@@ -983,7 +1662,7 @@ export default function InventoryPage() {
 
             <div className="p-6 space-y-4 flex-1 overflow-y-auto">
               <p className="text-xs text-gray-300">
-                ¿Estás seguro de que deseas eliminar permanentemente la cuenta de <span className="font-semibold text-white">{accountToDelete.emailCuenta}</span> ({accountToDelete.plan?.service?.nombre} - {accountToDelete.plan?.nombrePlan})? Esta acción no se puede deshacer.
+                ¿Estás seguro de que deseas eliminar permanentemente la cuenta <span className="font-mono text-amber-300 font-bold">#ACC-{accountToDelete.id.substring(0, 8).toUpperCase()}</span> (ID: <span className="font-mono text-gray-400">{accountToDelete.id}</span>) — <span className="font-semibold text-white">{accountToDelete.emailCuenta}</span> ({accountToDelete.plan?.service?.nombre} - {accountToDelete.plan?.nombrePlan})? Esta acción no se puede deshacer.
               </p>
             </div>
 

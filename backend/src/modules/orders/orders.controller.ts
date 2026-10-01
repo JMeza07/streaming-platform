@@ -135,6 +135,20 @@ export class OrdersController {
     return this.ordersService.getAllOrders({ estado, customerId, fecha, vendedor }, user);
   }
 
+  // ESCENARIO 12: UPGRADE DE PANTALLA CON PRORRATEO (Cliente)
+  @Post('upgrade-screen')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CLIENTE)
+  upgradeScreen(
+    @CurrentUser() user: any,
+    @Body() body: { parentSubscriptionId: string; planId: string; metodoPago?: string; comprobanteUrl?: string },
+  ) {
+    return this.ordersService.createProratedUpgrade(user.customerId, body.parentSubscriptionId, body.planId, {
+      metodoPago: body.metodoPago,
+      comprobanteUrl: body.comprobanteUrl,
+    });
+  }
+
   // DETALLE DE UNA ORDEN — DEBE ir DESPUÉS de rutas literales como my-orders
   @Get(':id')
   @UseGuards(RolesGuard)

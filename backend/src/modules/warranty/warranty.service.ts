@@ -224,6 +224,8 @@ export class WarrantyService {
         account: ticket.subscription.account,
       },
       cuentaActual: {
+        id: ticket.subscription.account?.id || null,
+        codigo: ticket.subscription.account?.id ? `#ACC-${ticket.subscription.account.id.substring(0, 8).toUpperCase()}` : null,
         email: ticket.subscription.account?.emailCuenta || 'N/A',
         perfil: ticket.subscription.account?.perfilAsignado || 'N/A',
         batchId: ticket.subscription.account?.batchId || null,
@@ -395,12 +397,21 @@ export class WarrantyService {
         },
       });
 
-      // 4. Asignar nueva cuenta a la suscripción
+      // 4. Asignar nueva cuenta a la suscripción y descongelar días pendientes si existían
+      const now = new Date();
+      let nuevaFechaVencimiento = subscription.fechaVencimiento;
+      if (subscription.diasPendientes && subscription.diasPendientes > 0) {
+        nuevaFechaVencimiento = new Date(now.getTime() + subscription.diasPendientes * 24 * 60 * 60 * 1000);
+      }
+
       await tx.subscription.update({
         where: { id: subscription.id },
         data: {
           accountId: nuevaCuenta.id,
           estado: SubscriptionStatus.ACTIVA,
+          fechaVencimiento: nuevaFechaVencimiento,
+          diasPendientes: 0,
+          congeladoAt: null,
         },
       });
 
@@ -419,6 +430,8 @@ export class WarrantyService {
         exito: true,
         pendienteStock: false,
         nuevaCuenta: {
+          id: nuevaCuenta.id,
+          codigo: `#ACC-${nuevaCuenta.id.substring(0, 8).toUpperCase()}`,
           email: nuevaCuenta.emailCuenta,
           password: nuevaCuenta.passwordCuenta,
           perfil: nuevaCuenta.perfilAsignado,
@@ -474,7 +487,9 @@ export class WarrantyService {
         servicio: subscription.plan?.service?.nombre,
         plan: subscription.plan?.nombrePlan,
         cuentaAnterior: subscription.account?.emailCuenta,
+        cuentaAnteriorId: subscription.account?.id,
         cuentaNueva: resultado.nuevaCuenta?.email,
+        cuentaNuevaId: resultado.nuevaCuenta?.id,
         pendienteStock: resultado.pendienteStock,
       },
       exito: true,
@@ -669,12 +684,21 @@ export class WarrantyService {
         data: { estado: AccountStatus.OCUPADA },
       });
 
-      // Asignar nueva cuenta a la suscripción y reactivarla
+      // Asignar nueva cuenta a la suscripción, reactivarla y descongelar días si existían
+      const nowAuto = new Date();
+      let fechaVencAuto = subscription.fechaVencimiento;
+      if (subscription.diasPendientes && subscription.diasPendientes > 0) {
+        fechaVencAuto = new Date(nowAuto.getTime() + subscription.diasPendientes * 24 * 60 * 60 * 1000);
+      }
+
       await tx.subscription.update({
         where: { id: subscription.id },
         data: {
           accountId: cuentaDisponible.id,
           estado: SubscriptionStatus.ACTIVA,
+          fechaVencimiento: fechaVencAuto,
+          diasPendientes: 0,
+          congeladoAt: null,
         },
       });
 
@@ -697,6 +721,8 @@ export class WarrantyService {
         exito: true,
         asignada: true,
         nuevaCuenta: {
+          id: cuentaDisponible.id,
+          codigo: `#ACC-${cuentaDisponible.id.substring(0, 8).toUpperCase()}`,
           email: cuentaDisponible.emailCuenta,
           password: cuentaDisponible.passwordCuenta,
           perfil: cuentaDisponible.perfilAsignado,

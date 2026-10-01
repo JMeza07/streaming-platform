@@ -17,54 +17,55 @@ enum UserRole {
 }
 
 model User {
-  id            String    @id @default(uuid())
-  nombre        String
-  email         String    @unique
-  passwordHash  String    @map("password_hash")
-  phone         String?
-  rol           UserRole  @default(CLIENTE)
-  activo        Boolean   @default(true)
-  modulosPermitidos String[] @default([]) @map("modulos_permitidos")
-  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
-  twoFactorSecret  String?   @map("two_factor_secret")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id                String    @id @default(uuid())
+  nombre            String
+  email             String    @unique
+  passwordHash      String    @map("password_hash")
+  phone             String?
+  rol               UserRole  @default(CLIENTE)
+  activo            Boolean   @default(true)
+  modulosPermitidos String[]  @default([]) @map("modulos_permitidos")
+  twoFactorEnabled  Boolean   @default(false) @map("two_factor_enabled")
+  twoFactorSecret   String?   @map("two_factor_secret")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
   
   // Relaciones
-  customer      Customer?
-  affiliate     Affiliate?
-  ventasRealizadas Order[]   @relation("OrderVendedor")
+  customer          Customer?
+  affiliate         Affiliate?
+  ventasRealizadas  Order[]   @relation("OrderVendedor")
   
   @@map("users")
 }
 
 // ============ CATÁLOGO ============
 model Service {
-  id          String   @id @default(uuid())
-  nombre      String   @unique
-  logoUrl     String?  @map("logo_url")
-  descripcion String?
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
+  id           String        @id @default(uuid())
+  nombre       String        @unique
+  logoUrl      String?       @map("logo_url")
+  descripcion  String?
+  activo       Boolean       @default(true)
+  createdAt    DateTime      @default(now()) @map("created_at")
   
-  plans       Plan[]
+  plans        Plan[]
+  rootAccounts RootAccount[]
   
   @@map("services")
 }
 
 model Plan {
-  id                   String   @id @default(uuid())
-  serviceId            String   @map("service_id")
-  nombrePlan           String   @map("nombre_plan")
+  id                   String         @id @default(uuid())
+  serviceId            String         @map("service_id")
+  nombrePlan           String         @map("nombre_plan")
   precio               Decimal
   resolucion           String?
-  pantallasSimultaneas Int      @default(1) @map("pantallas_simultaneas")
-  duracionDias         Int      @default(30) @map("duracion_dias")
-  garantiaDias         Int      @default(30) @map("garantia_dias")
-  activo               Boolean  @default(true)
-  createdAt            DateTime @default(now()) @map("created_at")
+  pantallasSimultaneas Int            @default(1) @map("pantallas_simultaneas")
+  duracionDias         Int            @default(30) @map("duracion_dias")
+  garantiaDias         Int            @default(30) @map("garantia_dias")
+  activo               Boolean        @default(true)
+  createdAt            DateTime       @default(now()) @map("created_at")
   
-  service              Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  service              Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   accounts             Account[]
   subscriptions        Subscription[]
   orderItems           OrderItem[]
@@ -72,49 +73,120 @@ model Plan {
   @@map("plans")
 }
 
-// ============ INVENTARIO ============
+// ============ PROVEEDORES ============
+model Provider {
+  id           String                @id @default(uuid())
+  nombre       String                @unique
+  contacto     String?
+  telefono     String?
+  email        String?
+  estado       String                @default("ACTIVO") // ACTIVO, CAIDO
+  tasaFallo    Decimal               @default(0) @map("tasa_fallo")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+
+  rootAccounts RootAccount[]
+  batches      SupplierBatch[]
+  incidents    RootAccountIncident[]
+
+  @@map("providers")
+}
+
+// ============ CUENTAS RAÍZ (MASTER / ROOT ACCOUNTS) ============
+enum RootAccountStatus {
+  ACTIVA
+  CAIDA
+  EN_AUDITORIA
+  NO_RENOVAR
+  CUARENTENA
+}
+
+model RootAccount {
+  id                     String                @id @default(uuid())
+  serviceId              String?               @map("service_id")
+  providerId             String?               @map("provider_id")
+  email                  String                @unique
+  password               String
+  fechaVencimientoRaiz   DateTime?             @map("fecha_vencimiento_raiz")
+  estado                 RootAccountStatus     @default(ACTIVA)
+  maxPerfiles            Int                   @default(5) @map("max_perfiles")
+  requiresPasswordChange Boolean               @default(false) @map("requires_password_change")
+
+  // Credenciales IMAP para lectura de códigos de hogar / IP (Netflix, Disney+, etc.)
+  imapHost               String?               @map("imap_host")
+  imapPort               Int?                  @default(993) @map("imap_port")
+  imapUser               String?               @map("imap_user")
+  imapPassword           String?               @map("imap_password")
+  imapSecure             Boolean               @default(true) @map("imap_secure")
+
+  createdAt              DateTime              @default(now()) @map("created_at")
+  updatedAt              DateTime              @updatedAt @map("updated_at")
+
+  service                Service?              @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  provider               Provider?             @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  accounts               Account[]
+  incidents              RootAccountIncident[]
+  infractions            ProfileInfraction[]
+
+  @@map("root_accounts")
+}
+
+// ============ INVENTARIO / PERFILES ============
 enum AccountStatus {
   DISPONIBLE
+  PENDIENTE_PAGO
   OCUPADA
   VENCIDA
+  RETENIDA_24H
+  CUARENTENA
   DEFECTUOSA
   BLOQUEADA
 }
 
 model Account {
-  id              String        @id @default(uuid())
-  planId          String        @map("plan_id")
-  emailCuenta     String        @map("email_cuenta")
-  passwordCuenta  String        @map("password_cuenta")
-  perfilAsignado  String?       @map("perfil_asignado")
-  pinPerfil       String?       @map("pin_perfil")
-  estado          AccountStatus @default(DISPONIBLE)
-  batchId         String?       @map("batch_id")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  id                    String              @id @default(uuid())
+  planId                String              @map("plan_id")
+  rootAccountId         String?             @map("root_account_id")
+  emailCuenta           String              @map("email_cuenta")
+  passwordCuenta        String              @map("password_cuenta")
+  perfilAsignado        String?             @map("perfil_asignado")
+  pinPerfil             String?             @map("pin_perfil")
+  assignedPin           String?             @map("assigned_pin")
+  estado                AccountStatus       @default(DISPONIBLE)
+  batchId               String?             @map("batch_id")
+  reservedUntil         DateTime?           @map("reserved_until")
+  reservedByCustomerId  String?             @map("reserved_by_customer_id")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
   
-  plan            Plan          @relation(fields: [planId], references: [id], onDelete: Cascade)
-  batch           SupplierBatch? @relation(fields: [batchId], references: [id])
-  subscriptions   Subscription[]
+  plan                  Plan                @relation(fields: [planId], references: [id], onDelete: Cascade)
+  rootAccount           RootAccount?        @relation(fields: [rootAccountId], references: [id], onDelete: SetNull)
+  batch                 SupplierBatch?      @relation(fields: [batchId], references: [id])
+  subscriptions         Subscription[]
+  infractions           ProfileInfraction[]
   
-  @@unique([planId, emailCuenta])
+  @@index([planId, emailCuenta])
   @@map("accounts")
 }
 
 // ============ CLIENTES ============
 model Customer {
-  id                  String   @id @default(uuid())
-  userId              String   @unique @map("user_id")
+  id                  String              @id @default(uuid())
+  userId              String              @unique @map("user_id")
   whatsapp            String
   pais                String?
-  optOutWhatsapp      Boolean  @default(false) @map("opt_out_whatsapp")
-  createdAt           DateTime @default(now()) @map("created_at")
+  optOutWhatsapp      Boolean             @default(false) @map("opt_out_whatsapp")
+  walletBalance       Decimal             @default(0) @map("wallet_balance")
+  strikes             Int                 @default(0)
+  estadoUsuario       String              @default("ACTIVO") @map("estado_usuario")
+  createdAt           DateTime            @default(now()) @map("created_at")
   
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptions       Subscription[]
   orders              Order[]
   notificationLogs    NotificationLog[]
   supportTickets      SupportTicket[]
+  infractions         ProfileInfraction[]
   
   @@map("customers")
 }
@@ -129,24 +201,29 @@ enum SubscriptionStatus {
 }
 
 model Subscription {
-  id               String             @id @default(uuid())
-  customerId       String             @map("customer_id")
-  planId           String             @map("plan_id")
-  accountId        String             @map("account_id")
-  orderId          String?            @map("order_id")
-  fechaInicio      DateTime           @default(now()) @map("fecha_inicio")
-  fechaVencimiento DateTime           @map("fecha_vencimiento")
-  estado           SubscriptionStatus @default(ACTIVA)
-  autoRenovar      Boolean            @default(false) @map("auto_renovar")
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
+  id                   String             @id @default(uuid())
+  customerId           String             @map("customer_id")
+  planId               String             @map("plan_id")
+  accountId            String             @map("account_id")
+  orderId              String?            @map("order_id")
+  parentSubscriptionId String?            @map("parent_subscription_id")
+  fechaInicio          DateTime           @default(now()) @map("fecha_inicio")
+  fechaVencimiento     DateTime           @map("fecha_vencimiento")
+  estado               SubscriptionStatus @default(ACTIVA)
+  autoRenovar          Boolean            @default(false) @map("auto_renovar")
+  credencialesVistas   Boolean            @default(false) @map("credenciales_vistas")
+  credencialesVistasAt DateTime?          @map("credenciales_vistas_at")
+  diasPendientes       Int                @default(0) @map("dias_pendientes")
+  congeladoAt          DateTime?          @map("congelado_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
   
-  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  plan             Plan               @relation(fields: [planId], references: [id])
-  account          Account            @relation(fields: [accountId], references: [id])
-  order            Order?             @relation(fields: [orderId], references: [id])
-  notificationLogs NotificationLog[]
-  supportTickets   SupportTicket[]
+  customer             Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  account              Account            @relation(fields: [accountId], references: [id])
+  order                Order?             @relation(fields: [orderId], references: [id])
+  notificationLogs     NotificationLog[]
+  supportTickets       SupportTicket[]
   
   @@index([fechaVencimiento, estado])
   @@map("subscriptions")
@@ -162,29 +239,32 @@ enum OrderStatus {
 }
 
 model Order {
-  id                 String      @id @default(uuid())
-  customerId         String      @map("customer_id")
-  total              Decimal
-  estado             OrderStatus @default(PENDIENTE)
-  metodoPago         String?     @map("metodo_pago")
-  referenciaExterna  String?     @map("referencia_externa")
-  comprobanteUrl     String?     @map("comprobante_url")
-  comprobanteVerificado Boolean   @default(false) @map("comprobante_verificado")
-  comprobanteVerificadoAt DateTime? @map("comprobante_verificado_at")
-  comprobanteVerificadoPor String?  @map("comprobante_verificado_por")
-  vendedorId         String?     @map("vendedor_id")
-  vendedorNombre     String?     @map("vendedor_nombre")
-  vendedorPorcentaje Decimal?    @map("vendedor_porcentaje")
-  vendedorComision   Decimal?    @map("vendedor_comision")
-  descripcionVenta   String?     @map("descripcion_venta")
-  createdAt          DateTime    @default(now()) @map("created_at")
-  updatedAt          DateTime    @updatedAt @map("updated_at")
-  commissions        Commission[]
+  id                       String       @id @default(uuid())
+  customerId               String       @map("customer_id")
+  parentOrderId            String?      @map("parent_order_id")
+  esProrrateo              Boolean      @default(false) @map("es_prorrateo")
+  total                    Decimal
+  estado                   OrderStatus  @default(PENDIENTE)
+  metodoPago               String?      @map("metodo_pago")
+  referenciaExterna        String?      @map("referencia_externa")
+  comprobanteUrl           String?      @map("comprobante_url")
+  comprobanteVerificado    Boolean      @default(false) @map("comprobante_verificado")
+  comprobanteVerificadoAt  DateTime?    @map("comprobante_verificado_at")
+  comprobanteVerificadoPor String?      @map("comprobante_verificado_por")
+  credencialesVistas       Boolean      @default(false) @map("credenciales_vistas")
+  vendedorId               String?      @map("vendedor_id")
+  vendedorNombre           String?      @map("vendedor_nombre")
+  vendedorPorcentaje       Decimal?     @map("vendedor_porcentaje")
+  vendedorComision         Decimal?     @map("vendedor_comision")
+  descripcionVenta         String?      @map("descripcion_venta")
+  createdAt                DateTime     @default(now()) @map("created_at")
+  updatedAt                DateTime     @updatedAt @map("updated_at")
+  commissions              Commission[]
   
-  customer           Customer    @relation(fields: [customerId], references: [id])
-  vendedor           User?       @relation("OrderVendedor", fields: [vendedorId], references: [id])
-  items              OrderItem[]
-  subscriptions      Subscription[]
+  customer                 Customer     @relation(fields: [customerId], references: [id])
+  vendedor                 User?        @relation("OrderVendedor", fields: [vendedorId], references: [id])
+  items                    OrderItem[]
+  subscriptions            Subscription[]
   
   @@map("orders")
 }
@@ -205,31 +285,71 @@ model OrderItem {
 
 // ============ PROVEEDORES Y LOTES ============
 model SupplierBatch {
-  id                String   @id @default(uuid())
-  proveedorNombre   String   @map("proveedor_nombre")
-  fechaCompra       DateTime @map("fecha_compra")
-  costoTotalLote    Decimal  @map("costo_total_lote")
-  cantidadCuentas   Int      @map("cantidad_cuentas")
-  tasaFalloActual   Decimal  @default(0) @map("tasa_fallo_actual")
-  estadoLote        String   @default("activo") @map("estado_lote")
-  createdAt         DateTime @default(now()) @map("created_at")
+  id                String    @id @default(uuid())
+  providerId        String?   @map("provider_id")
+  proveedorNombre   String    @map("proveedor_nombre")
+  fechaCompra       DateTime  @map("fecha_compra")
+  costoTotalLote    Decimal   @map("costo_total_lote")
+  cantidadCuentas   Int       @map("cantidad_cuentas")
+  tasaFalloActual   Decimal   @default(0) @map("tasa_fallo_actual")
+  estadoLote        String    @default("activo") @map("estado_lote")
+  createdAt         DateTime  @default(now()) @map("created_at")
   
+  provider          Provider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
   accounts          Account[]
   
   @@map("supplier_batches")
 }
 
+// ============ INCIDENCIAS Y AUDITORÍA DE RAÍZ ============
+model RootAccountIncident {
+  id                String       @id @default(uuid())
+  providerId        String?      @map("provider_id")
+  rootAccountId     String?      @map("root_account_id")
+  titulo            String
+  descripcion       String
+  cuentasAfectadas  Int          @default(0) @map("cuentas_afectadas")
+  clientesAfectados Int          @default(0) @map("clientes_afectados")
+  estado            String       @default("ABIERTO") // ABIERTO, EN_PROCESO, RESUELTO
+  createdAt         DateTime     @default(now()) @map("created_at")
+  resolvedAt        DateTime?    @map("resolved_at")
+
+  provider          Provider?    @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  rootAccount       RootAccount? @relation(fields: [rootAccountId], references: [id], onDelete: SetNull)
+
+  @@map("root_account_incidents")
+}
+
+model ProfileInfraction {
+  id                     String       @id @default(uuid())
+  customerId             String       @map("customer_id")
+  rootAccountId          String?      @map("root_account_id")
+  accountId              String?      @map("account_id")
+  tipo                   String       // PANTALLA_OCUPADA, SECUESTRO_PIN, USO_INDEBIDO
+  descripcion            String
+  strikesAplicados       Int          @default(1) @map("strikes_aplicados")
+  reportadoPorCustomerId String?      @map("reportado_por_customer_id")
+  estado                 String       @default("PENDIENTE") // PENDIENTE, VERIFICADO, DESESTIMADO
+  createdAt              DateTime     @default(now()) @map("created_at")
+
+  customer               Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rootAccount            RootAccount? @relation(fields: [rootAccountId], references: [id], onDelete: SetNull)
+  account                Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@map("profile_infractions")
+}
+
 // ============ AFILIADOS / VENDEDORES ============
 model Affiliate {
-  id             String   @id @default(uuid())
-  userId         String   @unique @map("user_id")
-  codigoReferido String   @unique @map("codigo_referido")
-  referidoPor    String?  @map("referido_por")
-  rango          String   @default("bronce")
-  walletBalance  Decimal  @default(0) @map("wallet_balance")
-  createdAt      DateTime @default(now()) @map("created_at")
+  id             String             @id @default(uuid())
+  userId         String             @unique @map("user_id")
+  codigoReferido String             @unique @map("codigo_referido")
+  referidoPor    String?            @map("referido_por")
+  rango          String             @default("bronce")
+  walletBalance  Decimal            @default(0) @map("wallet_balance")
+  createdAt      DateTime           @default(now()) @map("created_at")
   
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   commissions    Commission[]
   withdrawals    WalletWithdrawal[]
   
@@ -237,47 +357,47 @@ model Affiliate {
 }
 
 model Commission {
-  id             String   @id @default(uuid())
-  affiliateId    String   @map("affiliate_id")
-  orderId        String?  @map("order_id")  // ← Hacerlo opcional
-  tipo           String
-  porcentaje     Decimal
-  montoComision  Decimal  @map("monto_comision")
-  estado         String   @default("disponible")
-  createdAt      DateTime @default(now()) @map("created_at")
+  id            String    @id @default(uuid())
+  affiliateId   String    @map("affiliate_id")
+  orderId       String?   @map("order_id")
+  tipo          String
+  porcentaje    Decimal
+  montoComision Decimal   @map("monto_comision")
+  estado        String    @default("disponible")
+  createdAt     DateTime  @default(now()) @map("created_at")
   
-  affiliate      Affiliate @relation(fields: [affiliateId], references: [id])
-  order          Order?    @relation(fields: [orderId], references: [id])  // ← AÑADIR
+  affiliate     Affiliate @relation(fields: [affiliateId], references: [id])
+  order         Order?    @relation(fields: [orderId], references: [id])
   
   @@map("commissions")
 }
 
 model WalletWithdrawal {
-  id           String   @id @default(uuid())
-  affiliateId  String   @map("affiliate_id")
-  monto        Decimal
-  metodoPago   String?  @map("metodo_pago")
-  datosPago    String?  @map("datos_pago")
-  estado       String   @default("pendiente")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id          String    @id @default(uuid())
+  affiliateId String    @map("affiliate_id")
+  monto       Decimal
+  metodoPago  String?   @map("metodo_pago")
+  datosPago   String?   @map("datos_pago")
+  estado      String    @default("pendiente")
+  createdAt   DateTime  @default(now()) @map("created_at")
   
-  affiliate    Affiliate @relation(fields: [affiliateId], references: [id])
+  affiliate   Affiliate @relation(fields: [affiliateId], references: [id])
   
   @@map("wallet_withdrawals")
 }
 
 // ============ NOTIFICACIONES ============
 model NotificationLog {
-  id             String   @id @default(uuid())
-  customerId     String   @map("customer_id")
-  subscriptionId String?  @map("subscription_id")
-  tipoEvento     String   @map("tipo_evento")
+  id             String        @id @default(uuid())
+  customerId     String        @map("customer_id")
+  subscriptionId String?       @map("subscription_id")
+  tipoEvento     String        @map("tipo_evento")
   canal          String
-  mensajeEnviado String   @map("mensaje_enviado")
-  estadoEnvio    String   @default("pendiente") @map("estado_envio")
-  fechaEnvio     DateTime @default(now()) @map("fecha_envio")
+  mensajeEnviado String        @map("mensaje_enviado")
+  estadoEnvio    String        @default("pendiente") @map("estado_envio")
+  fechaEnvio     DateTime      @default(now()) @map("fecha_envio")
   
-  customer       Customer     @relation(fields: [customerId], references: [id])
+  customer       Customer      @relation(fields: [customerId], references: [id])
   subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
   
   @@map("notification_logs")
@@ -285,37 +405,37 @@ model NotificationLog {
 
 // ============ SOPORTE ============
 model SupportTicket {
-  id              String   @id @default(uuid())
-  subscriptionId  String   @map("subscription_id")
-  customerId      String   @map("customer_id")
-  motivoReporte   String   @map("motivo_reporte")
-  evidenciaUrl    String?  @map("evidencia_url")
-  estado          String   @default("pendiente_revision")
-  resueltoPor     String?  @map("resuelto_por")
-  createdAt       DateTime @default(now()) @map("created_at")
-  resolvedAt      DateTime? @map("resolved_at")
+  id             String       @id @default(uuid())
+  subscriptionId String       @map("subscription_id")
+  customerId     String       @map("customer_id")
+  motivoReporte  String       @map("motivo_reporte")
+  evidenciaUrl   String?      @map("evidencia_url")
+  estado         String       @default("pendiente_revision")
+  resueltoPor    String?      @map("resuelto_por")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  resolvedAt     DateTime?    @map("resolved_at")
   
-  subscription    Subscription @relation(fields: [subscriptionId], references: [id])
-  customer        Customer     @relation(fields: [customerId], references: [id])
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  customer       Customer     @relation(fields: [customerId], references: [id])
   
   @@map("support_tickets")
 }
 
 // ============ CONFIG WHATSAPP ============
 model WhatsappConfig {
-  id                       String   @id @default(uuid())
-  nombreConfig             String   @default("Principal") @map("nombre_config")
-  nombreRemitente          String?  @default("StreamControl") @map("nombre_remitente")
-  numeroWhatsapp           String?  @default("+573001234567") @map("numero_whatsapp")
-  zonaHoraria              String   @default("America/Bogota") @map("zona_horaria")
-  horaInicio               String   @default("09:00:00") @map("hora_inicio")
-  horaFin                  String   @default("20:00:00") @map("hora_fin")
-  notificacionesActivas    Boolean  @default(false) @map("notificaciones_activas")
-  plantillaEntrega         String?  @map("plantilla_entrega")
-  plantillaRecordatorio7d  String?  @map("plantilla_recordatorio_7d")
-  plantillaRecordatorio1d  String?  @map("plantilla_recordatorio_1d")
-  plantillaRecuperacion3d  String?  @map("plantilla_recuperacion_3d")
-  updatedAt                DateTime @updatedAt @map("updated_at")
+  id                      String   @id @default(uuid())
+  nombreConfig            String   @default("Principal") @map("nombre_config")
+  nombreRemitente         String?  @default("StreamControl") @map("nombre_remitente")
+  numeroWhatsapp          String?  @default("+573001234567") @map("numero_whatsapp")
+  zonaHoraria             String   @default("America/Bogota") @map("zona_horaria")
+  horaInicio              String   @default("09:00:00") @map("hora_inicio")
+  horaFin                 String   @default("20:00:00") @map("hora_fin")
+  notificacionesActivas   Boolean  @default(false) @map("notificaciones_activas")
+  plantillaEntrega        String?  @map("plantilla_entrega")
+  plantillaRecordatorio7d String?  @map("plantilla_recordatorio_7d")
+  plantillaRecordatorio1d String?  @map("plantilla_recordatorio_1d")
+  plantillaRecuperacion3d String?  @map("plantilla_recuperacion_3d")
+  updatedAt               DateTime @updatedAt @map("updated_at")
   
   @@map("whatsapp_config")
 }

@@ -74,6 +74,15 @@ export class CustomersService {
                 service: { select: { id: true, nombre: true, logoUrl: true } },
               },
             },
+            account: {
+              select: {
+                id: true,
+                emailCuenta: true,
+                perfilAsignado: true,
+                pinPerfil: true,
+                estado: true,
+              },
+            },
           },
         },
         orders: {
@@ -100,23 +109,56 @@ export class CustomersService {
         0
       );
 
-      // Plataformas únicas adquiridas
+      // Plataformas únicas adquiridas con sus respectivos IDs de cuenta
       const plataformasMap = new Map<
         string,
-        { id: string; nombre: string; logoUrl: string | null }
+        { id: string; nombre: string; logoUrl: string | null; accountIds: string[]; accountCodes: string[] }
       >();
 
+      const cuentasMap = new Map<string, any>();
+
       c.subscriptions.forEach((sub) => {
+        const accId = sub.accountId || sub.account?.id;
+        const accCode = accId ? `#ACC-${accId.substring(0, 8).toUpperCase()}` : null;
+
         if (sub.plan?.service) {
-          plataformasMap.set(sub.plan.service.id, {
-            id: sub.plan.service.id,
-            nombre: sub.plan.service.nombre,
-            logoUrl: sub.plan.service.logoUrl,
+          const existing = plataformasMap.get(sub.plan.service.id);
+          if (existing) {
+            if (accId && !existing.accountIds.includes(accId)) {
+              existing.accountIds.push(accId);
+            }
+            if (accCode && !existing.accountCodes.includes(accCode)) {
+              existing.accountCodes.push(accCode);
+            }
+          } else {
+            plataformasMap.set(sub.plan.service.id, {
+              id: sub.plan.service.id,
+              nombre: sub.plan.service.nombre,
+              logoUrl: sub.plan.service.logoUrl,
+              accountIds: accId ? [accId] : [],
+              accountCodes: accCode ? [accCode] : [],
+            });
+          }
+        }
+
+        if (accId && !cuentasMap.has(accId)) {
+          cuentasMap.set(accId, {
+            id: accId,
+            codigo: accCode,
+            servicio: sub.plan?.service?.nombre || 'Servicio',
+            plan: sub.plan?.nombrePlan || '',
+            emailCuenta: sub.account?.emailCuenta || '',
+            perfilAsignado: sub.account?.perfilAsignado || null,
+            pinPerfil: sub.account?.pinPerfil || null,
+            estadoCuenta: sub.account?.estado || null,
+            subscriptionId: sub.id,
+            estadoSub: sub.estado,
           });
         }
       });
 
       const plataformas = Array.from(plataformasMap.values());
+      const cuentas = Array.from(cuentasMap.values());
 
       // Suscripciones activas
       const suscripcionesActivas = c.subscriptions.filter(
@@ -139,15 +181,19 @@ export class CustomersService {
         activo: c.user.activo,
         createdAt: c.createdAt,
         totalGastado,
+        walletBalance: c.walletBalance || 0,
+        strikes: c.strikes || 0,
+        estadoUsuario: c.estadoUsuario || 'ACTIVO',
         totalOrdenes: c.orders.length,
         totalSuscripciones: c.subscriptions.length,
         suscripcionesActivas,
         ultimoPedido,
         plataformas,
+        cuentas,
       };
     });
 
-    // Filtro por texto de búsqueda (nombre, email, teléfono, país)
+    // Filtro por texto de búsqueda (nombre, email, teléfono, país, ID de cuenta, código #ACC o correo de cuenta)
     if (filters.search) {
       const term = filters.search.toLowerCase();
       items = items.filter(
@@ -155,7 +201,13 @@ export class CustomersService {
           c.nombre.toLowerCase().includes(term) ||
           c.email.toLowerCase().includes(term) ||
           c.telefono.includes(term) ||
-          c.pais.toLowerCase().includes(term)
+          c.pais.toLowerCase().includes(term) ||
+          c.cuentas?.some(
+            (a: any) =>
+              a.id?.toLowerCase().includes(term) ||
+              a.codigo?.toLowerCase().includes(term) ||
+              a.emailCuenta?.toLowerCase().includes(term)
+          )
       );
     }
 
@@ -246,6 +298,9 @@ export class CustomersService {
           orderBy: { createdAt: 'desc' },
         },
         supportTickets: {
+          orderBy: { createdAt: 'desc' },
+        },
+        infractions: {
           orderBy: { createdAt: 'desc' },
         },
         notificationLogs: {
