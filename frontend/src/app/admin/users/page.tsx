@@ -43,6 +43,7 @@ import {
   MessageSquare,
   ShieldAlert,
   BarChart3,
+  Truck,
   Settings,
 } from 'lucide-react';
 import TablePagination from '@/components/TablePagination';
@@ -94,6 +95,14 @@ const AVAILABLE_MODULES = [
     description: 'Carga de cuentas streaming, perfiles, PINs, stock disponible y lotes de proveedores.',
     icon: Database,
     color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+  },
+  {
+    id: '/admin/suppliers',
+    label: 'Proveedores & Compras',
+    categoria: 'Operaciones',
+    description: 'Directorio de proveedores mayoristas, compras de lotes, costos, márgenes y rentabilidad.',
+    icon: Truck,
+    color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
   },
   {
     id: '/admin/sales-accounts',

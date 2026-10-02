@@ -16,6 +16,10 @@ import {
   Trash2,
   Printer,
   Download,
+  Calculator,
+  HelpCircle,
+  ShieldAlert,
+  Percent,
 } from 'lucide-react';
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import TablePagination from '@/components/TablePagination';
@@ -76,6 +80,48 @@ export default function CatalogPage() {
     duracionDias: 30,
     garantiaDias: 30,
   });
+
+  // Calculadora de Precios basada en Manual Operativo (Costo Raíz + Tasa de Riesgo Caída + Margen Deseado)
+  const [showCalculatorNew, setShowCalculatorNew] = useState(false);
+  const [showCalculatorEdit, setShowCalculatorEdit] = useState(false);
+  const [calcParams, setCalcParams] = useState({
+    rootCost: 12000, // Costo cuenta raíz mayorista (COP)
+    riskRate: 20, // Tasa de caída / reposición sin garantía (%)
+    desiredMargin: 40, // Margen de ganancia neto (%)
+    profileCount: 4, // Perfiles vendibles por cuenta
+  });
+
+  const computedPricing = useMemo(() => {
+    const root = Number(calcParams.rootCost) || 0;
+    const risk = Number(calcParams.riskRate) || 0;
+    const margin = Number(calcParams.desiredMargin) || 0;
+    const profiles = Math.max(1, Number(calcParams.profileCount) || 1);
+
+    // 1. Costo Operativo Real: Costo Raíz + (Costo Raíz * Tasa de Riesgo)
+    const reserveFundPerAccount = root * (risk / 100);
+    const actualOperatingCost = root + reserveFundPerAccount;
+
+    // 2. Costo Unitario por Perfil: Costo Operativo Real / Perfiles Vendibles
+    const unitCost = actualOperatingCost / profiles;
+
+    // 3. Precio Final Sugerido: Costo Unitario / (1 - Margen Deseado)
+    const marginFactor = Math.max(0.01, 1 - margin / 100);
+    const finalPricePerProfile = unitCost / marginFactor;
+
+    // Fondo de Contingencia por perfil vendido
+    const contingencyPerProfile = reserveFundPerAccount / profiles;
+    // Ganancia neta esperada por perfil
+    const profitPerProfile = finalPricePerProfile - unitCost;
+
+    return {
+      actualOperatingCost: Math.round(actualOperatingCost),
+      reserveFundPerAccount: Math.round(reserveFundPerAccount),
+      unitCost: Math.round(unitCost),
+      finalPrice: Math.round(finalPricePerProfile),
+      contingencyPerProfile: Math.round(contingencyPerProfile),
+      profitPerProfile: Math.round(profitPerProfile),
+    };
+  }, [calcParams]);
 
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
@@ -630,17 +676,28 @@ export default function CatalogPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-gray-400 font-semibold mb-1">Precio (COP)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-gray-400 font-semibold">Precio de Venta (COP)</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowCalculatorNew(!showCalculatorNew)}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20"
+                    >
+                      <Calculator className="w-3 h-3" />
+                      {showCalculatorNew ? 'Ocultar Asistente' : 'Calcular con Riesgo'}
+                    </button>
+                  </div>
                   <input
                     type="number"
                     required
                     min={1000}
                     value={newPlan.precio}
                     onChange={(e) => setNewPlan({ ...newPlan, precio: e.target.value })}
-                    placeholder="15000"
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-red-600"
+                    placeholder="6000"
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-600"
                   />
                 </div>
+
                 <div>
                   <label className="block text-gray-400 font-semibold mb-1">Resolución</label>
                   <input
@@ -652,6 +709,97 @@ export default function CatalogPage() {
                   />
                 </div>
               </div>
+
+              {/* ASISTENTE DE PRICING BASADO EN MANUAL DE OPERACIONES */}
+              {showCalculatorNew && (
+                <div className="p-4 bg-gradient-to-br from-amber-500/5 to-orange-500/5 border border-amber-500/20 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
+                      <Calculator className="w-4 h-4" />
+                      <span>Modelo Matemático de Pricing (Manual de Operaciones)</span>
+                    </div>
+                    <span className="text-[10px] text-gray-400 font-mono">Fórmula con Fondo de Reserva</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Costo Raíz Mayorista</label>
+                      <input
+                        type="number"
+                        value={calcParams.rootCost}
+                        onChange={(e) => setCalcParams({ ...calcParams, rootCost: Number(e.target.value) })}
+                        placeholder="12000"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Tasa Riesgo Caída (%)</label>
+                      <input
+                        type="number"
+                        value={calcParams.riskRate}
+                        onChange={(e) => setCalcParams({ ...calcParams, riskRate: Number(e.target.value) })}
+                        placeholder="20"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Margen Neto (%)</label>
+                      <input
+                        type="number"
+                        value={calcParams.desiredMargin}
+                        onChange={(e) => setCalcParams({ ...calcParams, desiredMargin: Number(e.target.value) })}
+                        placeholder="40"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Perfiles Vendibles</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={calcParams.profileCount}
+                        onChange={(e) => setCalcParams({ ...calcParams, profileCount: Number(e.target.value) })}
+                        placeholder="4"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Resultados calculados */}
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-amber-500/10 text-[11px]">
+                    <div className="bg-gray-950/80 p-2 rounded-xl border border-gray-800">
+                      <span className="text-gray-400 block text-[10px]">Costo Operativo Real</span>
+                      <span className="font-mono font-bold text-white">${computedPricing.actualOperatingCost.toLocaleString()}</span>
+                      <span className="text-[9px] text-amber-400 block mt-0.5">(Incluye ${computedPricing.reserveFundPerAccount.toLocaleString()} reserva)</span>
+                    </div>
+
+                    <div className="bg-gray-950/80 p-2 rounded-xl border border-gray-800">
+                      <span className="text-gray-400 block text-[10px]">Costo Mínimo Unitario</span>
+                      <span className="font-mono font-bold text-white">${computedPricing.unitCost.toLocaleString()} / perfil</span>
+                      <span className="text-[9px] text-gray-500 block mt-0.5">Base de absorción</span>
+                    </div>
+
+                    <div className="bg-emerald-500/10 p-2 rounded-xl border border-emerald-500/20 flex flex-col justify-between">
+                      <div>
+                        <span className="text-emerald-400 block text-[10px] font-bold">Precio Sugerido PVP</span>
+                        <span className="font-mono font-black text-emerald-300 text-sm">
+                          ${computedPricing.finalPrice.toLocaleString()} COP
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewPlan({ ...newPlan, precio: String(computedPricing.finalPrice) });
+                        }}
+                        className="mt-1 text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-1 px-2 rounded-lg text-center transition-all shadow-sm"
+                      >
+                        Aplicar Precio al Plan
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -883,16 +1031,27 @@ export default function CatalogPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-gray-400 font-semibold mb-1">Precio (COP)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-gray-400 font-semibold">Precio de Venta (COP)</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowCalculatorEdit(!showCalculatorEdit)}
+                      className="text-[11px] text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 bg-blue-500/10 px-2 py-0.5 rounded-lg border border-blue-500/20"
+                    >
+                      <Calculator className="w-3 h-3" />
+                      {showCalculatorEdit ? 'Ocultar Asistente' : 'Calcular con Riesgo'}
+                    </button>
+                  </div>
                   <input
                     type="number"
                     required
                     min={1000}
                     value={editPlanForm.precio}
                     onChange={(e) => setEditPlanForm({ ...editPlanForm, precio: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
+
                 <div>
                   <label className="block text-gray-400 font-semibold mb-1">Resolución</label>
                   <input
@@ -904,6 +1063,97 @@ export default function CatalogPage() {
                   />
                 </div>
               </div>
+
+              {/* ASISTENTE DE PRICING BASADO EN MANUAL DE OPERACIONES */}
+              {showCalculatorEdit && (
+                <div className="p-4 bg-gradient-to-br from-blue-500/5 to-indigo-500/5 border border-blue-500/20 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-blue-400 font-bold text-xs">
+                      <Calculator className="w-4 h-4" />
+                      <span>Modelo Matemático de Pricing (Manual de Operaciones)</span>
+                    </div>
+                    <span className="text-[10px] text-gray-400 font-mono">Fórmula con Fondo de Reserva</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Costo Raíz Mayorista</label>
+                      <input
+                        type="number"
+                        value={calcParams.rootCost}
+                        onChange={(e) => setCalcParams({ ...calcParams, rootCost: Number(e.target.value) })}
+                        placeholder="12000"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Tasa Riesgo Caída (%)</label>
+                      <input
+                        type="number"
+                        value={calcParams.riskRate}
+                        onChange={(e) => setCalcParams({ ...calcParams, riskRate: Number(e.target.value) })}
+                        placeholder="20"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Margen Neto (%)</label>
+                      <input
+                        type="number"
+                        value={calcParams.desiredMargin}
+                        onChange={(e) => setCalcParams({ ...calcParams, desiredMargin: Number(e.target.value) })}
+                        placeholder="40"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Perfiles Vendibles</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={calcParams.profileCount}
+                        onChange={(e) => setCalcParams({ ...calcParams, profileCount: Number(e.target.value) })}
+                        placeholder="4"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Resultados calculados */}
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-blue-500/10 text-[11px]">
+                    <div className="bg-gray-950/80 p-2 rounded-xl border border-gray-800">
+                      <span className="text-gray-400 block text-[10px]">Costo Operativo Real</span>
+                      <span className="font-mono font-bold text-white">${computedPricing.actualOperatingCost.toLocaleString()}</span>
+                      <span className="text-[9px] text-blue-400 block mt-0.5">(Incluye ${computedPricing.reserveFundPerAccount.toLocaleString()} reserva)</span>
+                    </div>
+
+                    <div className="bg-gray-950/80 p-2 rounded-xl border border-gray-800">
+                      <span className="text-gray-400 block text-[10px]">Costo Mínimo Unitario</span>
+                      <span className="font-mono font-bold text-white">${computedPricing.unitCost.toLocaleString()} / perfil</span>
+                      <span className="text-[9px] text-gray-500 block mt-0.5">Base de absorción</span>
+                    </div>
+
+                    <div className="bg-emerald-500/10 p-2 rounded-xl border border-emerald-500/20 flex flex-col justify-between">
+                      <div>
+                        <span className="text-emerald-400 block text-[10px] font-bold">Precio Sugerido PVP</span>
+                        <span className="font-mono font-black text-emerald-300 text-sm">
+                          ${computedPricing.finalPrice.toLocaleString()} COP
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditPlanForm({ ...editPlanForm, precio: String(computedPricing.finalPrice) });
+                        }}
+                        className="mt-1 text-[10px] bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-2 rounded-lg text-center transition-all shadow-sm"
+                      >
+                        Aplicar Precio al Plan
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-3">
                 <div>

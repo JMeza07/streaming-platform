@@ -82,12 +82,14 @@ model Provider {
   email        String?
   estado       String                @default("ACTIVO") // ACTIVO, CAIDO
   tasaFallo    Decimal               @default(0) @map("tasa_fallo")
+  notas        String?
   createdAt    DateTime              @default(now()) @map("created_at")
   updatedAt    DateTime              @updatedAt @map("updated_at")
 
   rootAccounts RootAccount[]
   batches      SupplierBatch[]
   incidents    RootAccountIncident[]
+  accounts     Account[]
 
   @@map("providers")
 }
@@ -108,6 +110,7 @@ model RootAccount {
   email                  String                @unique
   password               String
   fechaVencimientoRaiz   DateTime?             @map("fecha_vencimiento_raiz")
+  costoCompra            Decimal?              @default(0) @map("costo_compra")
   estado                 RootAccountStatus     @default(ACTIVA)
   maxPerfiles            Int                   @default(5) @map("max_perfiles")
   requiresPasswordChange Boolean               @default(false) @map("requires_password_change")
@@ -147,11 +150,13 @@ model Account {
   id                    String              @id @default(uuid())
   planId                String              @map("plan_id")
   rootAccountId         String?             @map("root_account_id")
+  providerId            String?             @map("provider_id")
   emailCuenta           String              @map("email_cuenta")
   passwordCuenta        String              @map("password_cuenta")
   perfilAsignado        String?             @map("perfil_asignado")
   pinPerfil             String?             @map("pin_perfil")
   assignedPin           String?             @map("assigned_pin")
+  costoCompra           Decimal?            @default(0) @map("costo_compra")
   estado                AccountStatus       @default(DISPONIBLE)
   batchId               String?             @map("batch_id")
   reservedUntil         DateTime?           @map("reserved_until")
@@ -161,6 +166,7 @@ model Account {
   
   plan                  Plan                @relation(fields: [planId], references: [id], onDelete: Cascade)
   rootAccount           RootAccount?        @relation(fields: [rootAccountId], references: [id], onDelete: SetNull)
+  provider              Provider?           @relation(fields: [providerId], references: [id], onDelete: SetNull)
   batch                 SupplierBatch?      @relation(fields: [batchId], references: [id])
   subscriptions         Subscription[]
   infractions           ProfileInfraction[]

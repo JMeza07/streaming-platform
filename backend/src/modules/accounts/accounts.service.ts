@@ -246,6 +246,7 @@ export class AccountsService implements OnModuleInit {
     serviceId?: string;
     providerId?: string;
     fechaVencimientoRaiz?: string | Date;
+    costoCompra?: number;
     maxPerfiles?: number;
     imapHost?: string;
     imapPort?: number;
@@ -263,6 +264,7 @@ export class AccountsService implements OnModuleInit {
         serviceId: data.serviceId,
         providerId: data.providerId,
         fechaVencimientoRaiz: data.fechaVencimientoRaiz ? new Date(data.fechaVencimientoRaiz) : null,
+        costoCompra: data.costoCompra !== undefined ? data.costoCompra : 0,
         maxPerfiles: data.maxPerfiles || 5,
         imapHost: data.imapHost,
         imapPort: data.imapPort || 993,
@@ -731,12 +733,13 @@ export class AccountsService implements OnModuleInit {
     return { importados, duplicados, errores };
   }
 
-  async findAll(filters: { planId?: string; estado?: AccountStatus; batchId?: string; search?: string }) {
+  async findAll(filters: { planId?: string; estado?: AccountStatus; batchId?: string; providerId?: string; search?: string }) {
     return this.prisma.account.findMany({
       where: {
         ...(filters.planId && { planId: filters.planId }),
         ...(filters.estado && { estado: filters.estado }),
         ...(filters.batchId && { batchId: filters.batchId }),
+        ...(filters.providerId && { providerId: filters.providerId }),
         ...(filters.search && {
           OR: [
             { emailCuenta: { contains: filters.search, mode: 'insensitive' } },
@@ -746,7 +749,8 @@ export class AccountsService implements OnModuleInit {
       },
       include: {
         plan: { include: { service: true } },
-        rootAccount: true,
+        rootAccount: { include: { provider: true } },
+        provider: true,
         batch: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -758,7 +762,8 @@ export class AccountsService implements OnModuleInit {
       where: { id },
       include: {
         plan: { include: { service: true } },
-        rootAccount: true,
+        rootAccount: { include: { provider: true } },
+        provider: true,
         batch: true,
         subscriptions: { where: { estado: SubscriptionStatus.ACTIVA }, include: { customer: { include: { user: true } } } },
       },

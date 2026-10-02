@@ -57,6 +57,7 @@ export class AccountsController {
       serviceId?: string;
       providerId?: string;
       fechaVencimientoRaiz?: string;
+      costoCompra?: number;
       maxPerfiles?: number;
       imapHost?: string;
       imapPort?: number;
@@ -134,9 +135,10 @@ export class AccountsController {
     @Query('planId') planId?: string,
     @Query('estado') estado?: AccountStatus,
     @Query('batchId') batchId?: string,
+    @Query('providerId') providerId?: string,
     @Query('search') search?: string,
   ) {
-    return this.accountsService.findAll({ planId, estado, batchId, search });
+    return this.accountsService.findAll({ planId, estado, batchId, providerId, search });
   }
 
   @Get(':id')

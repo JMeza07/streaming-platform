@@ -11,6 +11,7 @@ export const ALL_SYSTEM_MODULES = [
   '/admin/seller',
   '/admin/customers',
   '/admin/inventory',
+  '/admin/suppliers',
   '/admin/sales-accounts',
   '/admin/orders',
   '/admin/renewals',

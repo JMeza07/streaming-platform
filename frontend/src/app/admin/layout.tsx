@@ -8,6 +8,7 @@ import api from '@/lib/api';
 import {
   LayoutDashboard,
   Database,
+  Truck,
   ShoppingCart,
   Film,
   Headset,
@@ -42,6 +43,7 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
   { label: 'Catálogo de Streaming', href: '/admin/catalog', icon: Film },
   { label: 'Inventario de Cuentas', href: '/admin/inventory', icon: Database },
+  { label: 'Proveedores & Compras', href: '/admin/suppliers', icon: Truck },
   { label: 'Órdenes y Ventas', href: '/admin/orders', icon: ShoppingCart },
   { label: 'Cuentas Vendidas', href: '/admin/sales-accounts', icon: KeyRound },
   { label: 'Renovaciones', href: '/admin/renewals', icon: RefreshCw },

@@ -76,6 +76,7 @@ export default function InventoryPage() {
     serviceId: '',
     providerId: '',
     fechaVencimientoRaiz: '',
+    costoCompra: '',
     maxPantallas: 5,
   });
 
@@ -129,7 +130,7 @@ export default function InventoryPage() {
         api.get('/accounts'),
         api.get('/plans'),
         api.get('/accounts/root-accounts').catch(() => ({ data: [] })),
-        api.get('/accounts/providers').catch(() => ({ data: [] })),
+        api.get('/providers').catch(() => ({ data: [] })),
         api.get('/services').catch(() => ({ data: [] })),
       ]);
       setAccounts(accRes.data || []);
@@ -225,9 +226,12 @@ export default function InventoryPage() {
     e.preventDefault();
     try {
       setFormLoading(true);
-      await api.post('/accounts/root-accounts', newRootAccount);
+      await api.post('/accounts/root-accounts', {
+        ...newRootAccount,
+        costoCompra: newRootAccount.costoCompra ? Number(newRootAccount.costoCompra) : 0,
+      });
       setShowAddRootModal(false);
-      setNewRootAccount({ email: '', password: '', serviceId: '', providerId: '', fechaVencimientoRaiz: '', maxPantallas: 5 });
+      setNewRootAccount({ email: '', password: '', serviceId: '', providerId: '', fechaVencimientoRaiz: '', costoCompra: '', maxPantallas: 5 });
       setSuccessMsg('Cuenta Raíz agregada exitosamente.');
       setTimeout(() => setSuccessMsg(''), 4000);
       fetchData();
@@ -241,14 +245,14 @@ export default function InventoryPage() {
   // Handlers Proveedores (Escenario 9)
   const handleMarkProviderDown = async (prov: any) => {
     const ok = await confirm(
-      `¿Marcar al proveedor "${prov.name}" como CAÍDO? Todas sus cuentas raíz asociadas se marcarán como CAÍDAS, se congelarán los días de los clientes y se creará un ticket maestro de incidencia (Escenario 9).`,
+      `¿Marcar al proveedor "${prov.nombre || prov.name}" como CAÍDO? Todas sus cuentas raíz asociadas se marcarán como CAÍDAS, se congelarán los días de los clientes y se creará un ticket maestro de incidencia (Escenario 9).`,
       { type: 'danger', title: 'Caída Masiva de Proveedor', confirmText: 'Confirmar Caída Masiva' }
     );
     if (!ok) return;
     try {
       setLoading(true);
-      await api.patch(`/accounts/providers/${prov.id}/mark-down`, { motivo: 'Caída masiva reportada por el proveedor' });
-      setSuccessMsg(`Proveedor ${prov.name} marcado como CAÍDO. Cuentas y clientes asociados congelados.`);
+      await api.post(`/providers/${prov.id}/mark-down`, { reason: 'Caída masiva reportada por el proveedor' });
+      setSuccessMsg(`Proveedor ${prov.nombre || prov.name} marcado como CAÍDO. Cuentas y clientes asociados congelados.`);
       setTimeout(() => setSuccessMsg(''), 4000);
       fetchData();
     } catch (err: any) {
@@ -262,7 +266,12 @@ export default function InventoryPage() {
     e.preventDefault();
     try {
       setFormLoading(true);
-      await api.post('/accounts/providers', newProvider);
+      await api.post('/providers', {
+        nombre: newProvider.name.trim(),
+        telefono: newProvider.contactPhone?.trim() || undefined,
+        email: newProvider.contactEmail?.trim() || undefined,
+        notas: newProvider.notes?.trim() || undefined,
+      });
       setShowAddProviderModal(false);
       setNewProvider({ name: '', contactPhone: '', contactEmail: '', notes: '' });
       setSuccessMsg('Proveedor registrado exitosamente.');
@@ -1043,23 +1052,23 @@ export default function InventoryPage() {
               providers.map((p) => (
                 <div key={p.id} className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-white text-sm">{p.name}</h3>
+                    <h3 className="font-bold text-white text-sm">{p.nombre || p.name}</h3>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      p.status === 'ACTIVO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                      (p.estado || p.status) === 'ACTIVO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                     }`}>
-                      {p.status}
+                      {p.estado || p.status}
                     </span>
                   </div>
 
                   <div className="text-xs text-gray-300 space-y-1">
-                    {p.contactPhone && <div><span className="text-gray-500">Tel / WA:</span> {p.contactPhone}</div>}
-                    {p.contactEmail && <div><span className="text-gray-500">Email:</span> {p.contactEmail}</div>}
-                    {p.notes && <div className="text-[11px] text-gray-400 italic mt-1">{p.notes}</div>}
+                    {(p.telefono || p.contactPhone) && <div><span className="text-gray-500">Tel / WA:</span> {p.telefono || p.contactPhone}</div>}
+                    {(p.email || p.contactEmail) && <div><span className="text-gray-500">Email:</span> {p.email || p.contactEmail}</div>}
+                    {(p.notas || p.notes) && <div className="text-[11px] text-gray-400 italic mt-1">{p.notas || p.notes}</div>}
                   </div>
 
                   <div className="pt-2 border-t border-gray-800/80 flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Cuentas vinculadas: <strong className="text-white">{p.rootAccounts?.length || 0}</strong></span>
-                    {p.status === 'ACTIVO' && (
+                    <span className="text-gray-500">Cuentas vinculadas: <strong className="text-white">{p.rootAccounts?.length || p._count?.rootAccounts || 0}</strong></span>
+                    {(p.estado || p.status) === 'ACTIVO' && (
                       <button
                         onClick={() => handleMarkProviderDown(p)}
                         className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-600/40 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1"
@@ -1195,7 +1204,7 @@ export default function InventoryPage() {
                   >
                     <option value="">Sin proveedor / Interno</option>
                     {providers.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                      <option key={p.id} value={p.id}>{p.nombre || p.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1225,6 +1234,18 @@ export default function InventoryPage() {
                     className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Costo de Compra al Proveedor ($)</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Ej. 25000"
+                  value={newRootAccount.costoCompra}
+                  onChange={(e) => setNewRootAccount({ ...newRootAccount, costoCompra: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-2">

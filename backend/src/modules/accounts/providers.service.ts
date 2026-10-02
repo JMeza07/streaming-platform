@@ -12,45 +12,185 @@ export class ProvidersService {
     private auditService: AuditService,
   ) {}
 
-  // LISTAR PROVEEDORES
+  // LISTAR PROVEEDORES CON MÉTRICAS Y COSTOS
   async getAll() {
-    return this.prisma.provider.findMany({
+    const providers = await this.prisma.provider.findMany({
       include: {
+        rootAccounts: {
+          select: {
+            id: true,
+            email: true,
+            costoCompra: true,
+            estado: true,
+            service: { select: { nombre: true } },
+            accounts: {
+              select: {
+                id: true,
+                estado: true,
+                costoCompra: true,
+                plan: { select: { precio: true, nombrePlan: true } },
+              },
+            },
+          },
+        },
+        batches: {
+          orderBy: { fechaCompra: 'desc' },
+        },
+        incidents: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        },
+        accounts: {
+          select: {
+            id: true,
+            estado: true,
+            costoCompra: true,
+            plan: { select: { precio: true } },
+          },
+        },
         _count: {
           select: {
             rootAccounts: true,
             batches: true,
             incidents: true,
+            accounts: true,
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Calcular analíticas financieras por proveedor
+    return providers.map((prov) => {
+      let totalCostoInvertido = 0;
+      let totalVentaPotencial = 0;
+      let cuentasTotales = 0;
+      let cuentasActivas = 0;
+
+      // 1. Costos de cuentas raíz
+      prov.rootAccounts.forEach((ra) => {
+        const costoRaiz = Number(ra.costoCompra || 0);
+        totalCostoInvertido += costoRaiz;
+
+        ra.accounts.forEach((acc) => {
+          cuentasTotales++;
+          if (acc.estado === AccountStatus.OCUPADA) cuentasActivas++;
+          const precioVenta = Number(acc.plan?.precio || 0);
+          totalVentaPotencial += precioVenta;
+        });
+      });
+
+      // 2. Costos de perfiles/cuentas individuales directas
+      prov.accounts.forEach((acc) => {
+        cuentasTotales++;
+        if (acc.estado === AccountStatus.OCUPADA) cuentasActivas++;
+        totalCostoInvertido += Number(acc.costoCompra || 0);
+        totalVentaPotencial += Number(acc.plan?.precio || 0);
+      });
+
+      // 3. Costos de lotes
+      const costoLotes = prov.batches.reduce((acc, b) => acc + Number(b.costoTotalLote || 0), 0);
+      if (costoLotes > totalCostoInvertido) {
+        totalCostoInvertido = costoLotes;
+      }
+
+      const margenGananciaEstimada = totalVentaPotencial - totalCostoInvertido;
+      const roi = totalCostoInvertido > 0 ? (margenGananciaEstimada / totalCostoInvertido) * 100 : 0;
+
+      return {
+        ...prov,
+        metricas: {
+          totalCostoInvertido,
+          totalVentaPotencial,
+          margenGananciaEstimada,
+          roi: Math.round(roi * 100) / 100,
+          cuentasTotales,
+          cuentasActivas,
+        },
+      };
+    });
   }
 
-  // OBTENER UNO
+  // OBTENER UNO CON DETALLES COMPLETOS
   async getById(id: string) {
     const provider = await this.prisma.provider.findUnique({
       where: { id },
       include: {
         rootAccounts: {
           include: {
-            accounts: true,
+            accounts: {
+              include: {
+                plan: true,
+                subscriptions: {
+                  where: { estado: SubscriptionStatus.ACTIVA },
+                  include: { customer: { include: { user: true } } },
+                },
+              },
+            },
             service: true,
+          },
+        },
+        accounts: {
+          include: {
+            plan: { include: { service: true } },
+            subscriptions: {
+              where: { estado: SubscriptionStatus.ACTIVA },
+              include: { customer: { include: { user: true } } },
+            },
           },
         },
         incidents: {
           orderBy: { createdAt: 'desc' },
         },
-        batches: true,
+        batches: {
+          include: {
+            accounts: {
+              include: { plan: true },
+            },
+          },
+          orderBy: { fechaCompra: 'desc' },
+        },
       },
     });
     if (!provider) throw new NotFoundException('Proveedor no encontrado');
-    return provider;
+
+    // Calcular rentabilidad y métricas del proveedor
+    let totalCosto = 0;
+    let totalIngresosEstimados = 0;
+
+    provider.rootAccounts.forEach((ra) => {
+      totalCosto += Number(ra.costoCompra || 0);
+      ra.accounts.forEach((acc) => {
+        totalIngresosEstimados += Number(acc.plan?.precio || 0);
+      });
+    });
+
+    provider.accounts.forEach((acc) => {
+      totalCosto += Number(acc.costoCompra || 0);
+      totalIngresosEstimados += Number(acc.plan?.precio || 0);
+    });
+
+    const costoLotes = provider.batches.reduce((sum, b) => sum + Number(b.costoTotalLote || 0), 0);
+    if (costoLotes > totalCosto) {
+      totalCosto = costoLotes;
+    }
+
+    const margen = totalIngresosEstimados - totalCosto;
+    const margenPorcentaje = totalCosto > 0 ? (margen / totalCosto) * 100 : 0;
+
+    return {
+      ...provider,
+      metricas: {
+        totalInvertido: totalCosto,
+        totalVentaProyectada: totalIngresosEstimados,
+        margenGanancia: margen,
+        margenPorcentaje: Math.round(margenPorcentaje * 100) / 100,
+      },
+    };
   }
 
   // CREAR PROVEEDOR
-  async create(data: { nombre: string; contacto?: string; telefono?: string; email?: string }) {
+  async create(data: { nombre: string; contacto?: string; telefono?: string; email?: string; notas?: string }) {
     const existing = await this.prisma.provider.findUnique({ where: { nombre: data.nombre.trim() } });
     if (existing) throw new BadRequestException('Ya existe un proveedor con este nombre');
 
@@ -60,6 +200,7 @@ export class ProvidersService {
         contacto: data.contacto,
         telefono: data.telefono,
         email: data.email,
+        notas: data.notas,
         estado: 'ACTIVO',
       },
     });
@@ -77,7 +218,7 @@ export class ProvidersService {
   }
 
   // ACTUALIZAR PROVEEDOR
-  async update(id: string, data: { nombre?: string; contacto?: string; telefono?: string; email?: string; estado?: string }) {
+  async update(id: string, data: { nombre?: string; contacto?: string; telefono?: string; email?: string; estado?: string; notas?: string }) {
     const provider = await this.prisma.provider.findUnique({ where: { id } });
     if (!provider) throw new NotFoundException('Proveedor no encontrado');
 
@@ -85,6 +226,77 @@ export class ProvidersService {
       where: { id },
       data,
     });
+  }
+
+  // REGISTRAR COMPRA DE LOTE / BATCH AL PROVEEDOR
+  async createBatch(providerId: string, data: {
+    costoTotalLote: number;
+    cantidadCuentas: number;
+    fechaCompra?: string;
+    cuentas?: Array<{
+      planId: string;
+      emailCuenta: string;
+      passwordCuenta: string;
+      perfilAsignado?: string;
+      pinPerfil?: string;
+      costoCompra?: number;
+    }>;
+  }) {
+    const provider = await this.prisma.provider.findUnique({ where: { id: providerId } });
+    if (!provider) throw new NotFoundException('Proveedor no encontrado');
+
+    const fechaCompra = data.fechaCompra ? new Date(data.fechaCompra) : new Date();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Crear el lote de compra
+      const batch = await tx.supplierBatch.create({
+        data: {
+          providerId,
+          proveedorNombre: provider.nombre,
+          fechaCompra,
+          costoTotalLote: data.costoTotalLote,
+          cantidadCuentas: data.cantidadCuentas || (data.cuentas?.length || 0),
+          estadoLote: 'activo',
+        },
+      });
+
+      // 2. Si vienen cuentas para insertar de inmediato
+      let cuentasCreadas = 0;
+      if (Array.isArray(data.cuentas) && data.cuentas.length > 0) {
+        const costoUnitarioPorDefecto = data.cantidadCuentas > 0 ? Number(data.costoTotalLote) / data.cantidadCuentas : 0;
+
+        for (const item of data.cuentas) {
+          await tx.account.create({
+            data: {
+              planId: item.planId,
+              emailCuenta: item.emailCuenta,
+              passwordCuenta: item.passwordCuenta,
+              perfilAsignado: item.perfilAsignado,
+              pinPerfil: item.pinPerfil,
+              assignedPin: item.pinPerfil,
+              costoCompra: item.costoCompra !== undefined ? item.costoCompra : costoUnitarioPorDefecto,
+              batchId: batch.id,
+              providerId: provider.id,
+              estado: AccountStatus.DISPONIBLE,
+            },
+          });
+          cuentasCreadas++;
+        }
+      }
+
+      return { batch, cuentasCreadas };
+    });
+
+    await this.auditService.registrarEvento({
+      modulo: AuditCategory.FINANZAS,
+      accion: 'COMPRA_LOTE_PROVEEDOR',
+      severidad: AuditSeverity.INFO,
+      descripcion: `Compra de lote registrada para proveedor [${provider.nombre}]: Costo $${data.costoTotalLote}, ${data.cantidadCuentas} cuentas adquiridas.`,
+      entidadTipo: 'SupplierBatch',
+      entidadId: result.batch.id,
+    });
+
+    return result;
   }
 
   // =========================================================================

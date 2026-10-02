@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Put, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { ProvidersService } from './providers.service';
+import { CreateProviderDto, UpdateProviderDto } from './dto/provider.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -23,7 +24,7 @@ export class ProvidersController {
 
   @Post()
   @Roles(UserRole.ADMIN)
-  create(@Body() body: { nombre: string; contacto?: string; telefono?: string; email?: string }) {
+  create(@Body() body: CreateProviderDto) {
     return this.providersService.create(body);
   }
 
@@ -31,9 +32,39 @@ export class ProvidersController {
   @Roles(UserRole.ADMIN)
   update(
     @Param('id') id: string,
-    @Body() body: { nombre?: string; contacto?: string; telefono?: string; email?: string; estado?: string },
+    @Body() body: UpdateProviderDto,
   ) {
     return this.providersService.update(id, body);
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.ADMIN)
+  patch(
+    @Param('id') id: string,
+    @Body() body: UpdateProviderDto,
+  ) {
+    return this.providersService.update(id, body);
+  }
+
+  @Post(':id/batches')
+  @Roles(UserRole.ADMIN)
+  createBatch(
+    @Param('id') id: string,
+    @Body() body: {
+      costoTotalLote: number;
+      cantidadCuentas: number;
+      fechaCompra?: string;
+      cuentas?: Array<{
+        planId: string;
+        emailCuenta: string;
+        passwordCuenta: string;
+        perfilAsignado?: string;
+        pinPerfil?: string;
+        costoCompra?: number;
+      }>;
+    },
+  ) {
+    return this.providersService.createBatch(id, body);
   }
 
   // =========================================================================
