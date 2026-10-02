@@ -245,6 +245,9 @@ export class AccountsService implements OnModuleInit {
     password: string;
     serviceId?: string;
     providerId?: string;
+    planId?: string;
+    tipoVenta?: 'POR_PANTALLA' | 'COMPLETA'; // Flexibilidad híbrida mayorista/minorista
+    generateProfiles?: boolean;
     fechaVencimientoRaiz?: string | Date;
     costoCompra?: number;
     maxPerfiles?: number;
@@ -254,33 +257,83 @@ export class AccountsService implements OnModuleInit {
     imapPassword?: string;
     imapSecure?: boolean;
   }) {
-    const existing = await this.prisma.rootAccount.findUnique({ where: { email: data.email.trim() } });
+    const emailRaiz = data.email.trim();
+    const existing = await this.prisma.rootAccount.findUnique({ where: { email: emailRaiz } });
     if (existing) throw new ConflictException('Esta cuenta raíz ya existe');
+
+    const maxPerfiles = data.maxPerfiles || 5;
+    const tipoVenta = data.tipoVenta || 'POR_PANTALLA';
+
+    // Generar unidades de venta según modelo de negocio híbrido
+    let perfilesACrear: any[] = [];
+
+    if (data.planId && data.generateProfiles !== false) {
+      if (tipoVenta === 'COMPLETA') {
+        // Escenario B: Venta de Cuenta Completa (1 sola unidad de venta que abarca toda la cuenta)
+        perfilesACrear = [
+          {
+            planId: data.planId,
+            providerId: data.providerId || null,
+            emailCuenta: emailRaiz,
+            passwordCuenta: data.password,
+            perfilAsignado: 'Cuenta Completa (Todas las pantallas)',
+            estado: AccountStatus.DISPONIBLE,
+            costoCompra: data.costoCompra ? Number(data.costoCompra) : 0,
+          },
+        ];
+      } else {
+        // Escenario A: Venta por Pantallas Individuales (N registros independientes para N clientes)
+        perfilesACrear = Array.from({ length: maxPerfiles }).map((_, index) => ({
+          planId: data.planId!,
+          providerId: data.providerId || null,
+          emailCuenta: emailRaiz,
+          passwordCuenta: data.password,
+          perfilAsignado: `Pantalla ${index + 1}`,
+          estado: AccountStatus.DISPONIBLE,
+          costoCompra: data.costoCompra ? Number(data.costoCompra) / maxPerfiles : 0,
+        }));
+      }
+    }
 
     const rootAccount = await this.prisma.rootAccount.create({
       data: {
-        email: data.email.trim(),
+        email: emailRaiz,
         password: data.password,
         serviceId: data.serviceId,
         providerId: data.providerId,
         fechaVencimientoRaiz: data.fechaVencimientoRaiz ? new Date(data.fechaVencimientoRaiz) : null,
         costoCompra: data.costoCompra !== undefined ? data.costoCompra : 0,
-        maxPerfiles: data.maxPerfiles || 5,
+        maxPerfiles: maxPerfiles,
         imapHost: data.imapHost,
         imapPort: data.imapPort || 993,
         imapUser: data.imapUser,
         imapPassword: data.imapPassword,
         imapSecure: data.imapSecure !== false,
         estado: RootAccountStatus.ACTIVA,
+        ...(perfilesACrear.length > 0 && {
+          accounts: {
+            create: perfilesACrear,
+          },
+        }),
       },
-      include: { service: true, provider: true },
+      include: {
+        service: true,
+        provider: true,
+        accounts: true,
+      },
     });
+
+    if (perfilesACrear.length > 0 && data.planId) {
+      this.warrantyService.processPendingWarrantiesForPlan(data.planId).catch((err) => {
+        this.logger.error(`Error procesando garantías tras generar stock de pantallas: ${err.message}`);
+      });
+    }
 
     await this.auditService.registrarEvento({
       modulo: AuditCategory.INVENTARIO,
       accion: 'CREACION_CUENTA_RAIZ',
       severidad: AuditSeverity.INFO,
-      descripcion: `Nueva cuenta raíz registrada: ${rootAccount.email}`,
+      descripcion: `Nueva cuenta raíz registrada: ${rootAccount.email}. Stock generado: ${rootAccount.accounts?.length || 0} pantallas disponibles.`,
       entidadTipo: 'RootAccount',
       entidadId: rootAccount.id,
     });
@@ -483,6 +536,97 @@ export class AccountsService implements OnModuleInit {
     return {
       message: `Contraseña actualizada con éxito y enviada a ${notificados.length} clientes legítimos.`,
       clientesNotificados: notificados,
+    };
+  }
+
+  // =========================================================================
+  // CONVERSIÓN DINÁMICA DE INVENTARIO (POR PANTALLA <-> CUENTA COMPLETA)
+  // =========================================================================
+  async convertInventoryType(
+    rootAccountId: string,
+    targetType: 'POR_PANTALLA' | 'COMPLETA',
+    targetPlanId: string,
+    currentUser: any,
+  ) {
+    const root = await this.prisma.rootAccount.findUnique({
+      where: { id: rootAccountId },
+      include: {
+        accounts: {
+          include: {
+            subscriptions: {
+              where: { estado: SubscriptionStatus.ACTIVA },
+            },
+          },
+        },
+      },
+    });
+
+    if (!root) throw new NotFoundException('Cuenta raíz no encontrada');
+
+    // Verificar si tiene suscripciones activas
+    const tieneClientesActivos = root.accounts.some((a) => a.subscriptions.length > 0);
+    if (tieneClientesActivos) {
+      throw new BadRequestException(
+        'No se puede convertir dinámicamente una cuenta que ya tiene perfiles con clientes activos.',
+      );
+    }
+
+    const plan = await this.prisma.plan.findUnique({ where: { id: targetPlanId } });
+    if (!plan) throw new NotFoundException('Plan de destino no encontrado');
+
+    const maxPerfiles = root.maxPerfiles || 5;
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Eliminar los registros de venta actuales que están en DISPONIBLE
+      await tx.account.deleteMany({
+        where: { rootAccountId },
+      });
+
+      // 2. Crear las nuevas unidades de venta según el tipo objetivo
+      if (targetType === 'COMPLETA') {
+        await tx.account.create({
+          data: {
+            planId: targetPlanId,
+            rootAccountId,
+            providerId: root.providerId,
+            emailCuenta: root.email,
+            passwordCuenta: root.password,
+            perfilAsignado: 'Cuenta Completa (Todas las pantallas)',
+            estado: AccountStatus.DISPONIBLE,
+            costoCompra: root.costoCompra ? Number(root.costoCompra) : 0,
+          },
+        });
+      } else {
+        const perfiles = Array.from({ length: maxPerfiles }).map((_, index) => ({
+          planId: targetPlanId,
+          rootAccountId,
+          providerId: root.providerId,
+          emailCuenta: root.email,
+          passwordCuenta: root.password,
+          perfilAsignado: `Pantalla ${index + 1}`,
+          estado: AccountStatus.DISPONIBLE,
+          costoCompra: root.costoCompra ? Number(root.costoCompra) / maxPerfiles : 0,
+        }));
+
+        await tx.account.createMany({
+          data: perfiles,
+        });
+      }
+    });
+
+    await this.auditService.registrarEvento({
+      usuarioId: currentUser?.id || currentUser?.userId,
+      modulo: AuditCategory.INVENTARIO,
+      accion: 'CONVERSION_INVENTARIO',
+      severidad: AuditSeverity.INFO,
+      descripcion: `Cuenta raíz [${root.email}] convertida dinámicamente a modalidad ${targetType}.`,
+      entidadTipo: 'RootAccount',
+      entidadId: root.id,
+    });
+
+    return {
+      message: `Cuenta raíz convertida con éxito a modalidad ${targetType}.`,
+      targetType,
     };
   }
 

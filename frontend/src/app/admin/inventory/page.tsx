@@ -31,6 +31,7 @@ import {
   Building2,
   Sparkles,
   AlertTriangle,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import { useDialog } from '@/components/Dialog';
@@ -75,10 +76,18 @@ export default function InventoryPage() {
     password: '',
     serviceId: '',
     providerId: '',
+    planId: '',
+    tipoVenta: 'POR_PANTALLA' as 'POR_PANTALLA' | 'COMPLETA',
+    generateProfiles: true,
     fechaVencimientoRaiz: '',
     costoCompra: '',
     maxPantallas: 5,
   });
+
+  // Modal Conversión Dinámica de Inventario (Por Pantallas <-> Cuenta Completa)
+  const [convertingAccount, setConvertingAccount] = useState<any | null>(null);
+  const [convertTargetType, setConvertTargetType] = useState<'POR_PANTALLA' | 'COMPLETA'>('COMPLETA');
+  const [convertTargetPlanId, setConvertTargetPlanId] = useState('');
 
   const [showAddProviderModal, setShowAddProviderModal] = useState(false);
   const [newProvider, setNewProvider] = useState({
@@ -229,14 +238,57 @@ export default function InventoryPage() {
       await api.post('/accounts/root-accounts', {
         ...newRootAccount,
         costoCompra: newRootAccount.costoCompra ? Number(newRootAccount.costoCompra) : 0,
+        planId: newRootAccount.planId || undefined,
+        tipoVenta: newRootAccount.tipoVenta,
+        generateProfiles: newRootAccount.generateProfiles,
       });
       setShowAddRootModal(false);
-      setNewRootAccount({ email: '', password: '', serviceId: '', providerId: '', fechaVencimientoRaiz: '', costoCompra: '', maxPantallas: 5 });
-      setSuccessMsg('Cuenta Raíz agregada exitosamente.');
+      setNewRootAccount({
+        email: '',
+        password: '',
+        serviceId: '',
+        providerId: '',
+        planId: '',
+        tipoVenta: 'POR_PANTALLA',
+        generateProfiles: true,
+        fechaVencimientoRaiz: '',
+        costoCompra: '',
+        maxPantallas: 5,
+      });
+      setSuccessMsg('Cuenta Raíz agregada exitosamente y stock de ventas generado.');
       setTimeout(() => setSuccessMsg(''), 4000);
       fetchData();
     } catch (err: any) {
       setFormError(err.response?.data?.message || 'Error al crear cuenta raíz');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleConvertInventory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!convertingAccount) return;
+    if (!convertTargetPlanId) {
+      await alert('Por favor selecciona el plan de catálogo destino.', { type: 'error', title: 'Plan Requerido' });
+      return;
+    }
+
+    try {
+      setFormLoading(true);
+      const res = await api.post(`/accounts/root-accounts/${convertingAccount.id}/convert-inventory`, {
+        targetType: convertTargetType,
+        targetPlanId: convertTargetPlanId,
+      });
+      setConvertingAccount(null);
+      setConvertTargetPlanId('');
+      setSuccessMsg(res.data?.message || 'Modalidad de inventario convertida exitosamente.');
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchData();
+    } catch (err: any) {
+      await alert(err.response?.data?.message || 'Error al convertir modalidad de inventario', {
+        type: 'error',
+        title: 'Error de Conversión',
+      });
     } finally {
       setFormLoading(false);
     }
@@ -990,6 +1042,20 @@ export default function InventoryPage() {
                                   Confirmar Rotación
                                 </button>
                               )}
+                              {activeProfiles === 0 && (
+                                <button
+                                  onClick={() => {
+                                    setConvertingAccount(ra);
+                                    const currentUnits = ra.accounts?.length || 0;
+                                    setConvertTargetType(currentUnits > 1 ? 'COMPLETA' : 'POR_PANTALLA');
+                                    setConvertTargetPlanId('');
+                                  }}
+                                  className="p-1.5 text-gray-400 hover:text-emerald-300 hover:bg-emerald-950/40 rounded-lg transition-colors cursor-pointer"
+                                  title="Conversión Dinámica de Inventario (Por Pantallas <-> Cuenta Completa)"
+                                >
+                                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <button
                                 onClick={() => { setRotatingAccount(ra); setNewPasswordValue(''); }}
                                 className="p-1.5 text-gray-400 hover:text-indigo-300 hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
@@ -1248,6 +1314,95 @@ export default function InventoryPage() {
                 />
               </div>
 
+              {/* MODALIDAD DE VENTA (HÍBRIDO: MINORISTA VS MAYORISTA) */}
+              <div className="p-3 bg-gray-950/60 border border-gray-800 rounded-xl space-y-2">
+                <label className="block text-gray-300 font-semibold text-xs">
+                  ¿Cómo se comercializará esta cuenta?
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewRootAccount({ ...newRootAccount, tipoVenta: 'POR_PANTALLA' })}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      newRootAccount.tipoVenta === 'POR_PANTALLA'
+                        ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm shadow-indigo-500/20'
+                        : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <div className="font-bold text-xs flex items-center gap-1.5">
+                      <span>Por Pantallas</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 uppercase">Minorista</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Genera {newRootAccount.maxPantallas} perfiles separados para clientes independientes.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewRootAccount({ ...newRootAccount, tipoVenta: 'COMPLETA' })}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      newRootAccount.tipoVenta === 'COMPLETA'
+                        ? 'bg-emerald-600/20 border-emerald-500 text-white shadow-sm shadow-emerald-500/20'
+                        : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <div className="font-bold text-xs flex items-center gap-1.5">
+                      <span>Cuenta Completa</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 uppercase">Mayorista</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      1 sola unidad de venta comercial. El cliente gestiona todos los perfiles.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* GENERACIÓN ATÓMICA DE PANTALLAS (INVENTARIO DISPONIBLE) */}
+              <div className="p-3 bg-indigo-950/20 border border-indigo-800/40 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-gray-300 font-bold flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newRootAccount.generateProfiles}
+                      onChange={(e) => setNewRootAccount({ ...newRootAccount, generateProfiles: e.target.checked })}
+                      className="rounded bg-gray-900 border-gray-700 text-indigo-600 focus:ring-indigo-600"
+                    />
+                    <span>Generar unidades de stock automáticamente</span>
+                  </label>
+                  <span className="text-[10px] text-indigo-400 font-mono">
+                    {newRootAccount.tipoVenta === 'COMPLETA' ? '1 cuenta completa' : `${newRootAccount.maxPantallas} perfiles`}
+                  </span>
+                </div>
+
+                {newRootAccount.generateProfiles && (
+                  <div>
+                    <label className="block text-[11px] text-gray-400 mb-1">
+                      Asignar al Plan de Catálogo <span className="text-indigo-400">*</span>
+                    </label>
+                    <select
+                      value={newRootAccount.planId}
+                      onChange={(e) => setNewRootAccount({ ...newRootAccount, planId: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600 text-xs"
+                    >
+                      <option value="">Selecciona el plan para las unidades</option>
+                      {plans
+                        .filter((pl) => !newRootAccount.serviceId || pl.serviceId === newRootAccount.serviceId)
+                        .map((pl) => (
+                          <option key={pl.id} value={pl.id}>
+                            {pl.service?.nombre || 'Streaming'} - {pl.nombrePlan} ({pl.pantallasSimultaneas || 1} {pl.pantallasSimultaneas === 1 ? 'pantalla' : 'pantallas'}) - ${Number(pl.precio).toLocaleString()}
+                          </option>
+                        ))}
+                    </select>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      {newRootAccount.tipoVenta === 'COMPLETA'
+                        ? 'Se creará 1 unidad de venta única ("Cuenta Completa") en estado DISPONIBLE vinculada a esta cuenta raíz.'
+                        : `Se crearán atómicamente ${newRootAccount.maxPantallas} perfiles individuales ("Pantalla 1", "Pantalla 2"...) en estado DISPONIBLE.`}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-end gap-2.5 pt-2">
                 <button
                   type="button"
@@ -1263,6 +1418,116 @@ export default function InventoryPage() {
                 >
                   {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   <span>Guardar Cuenta Raíz</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONVERSIÓN DINÁMICA DE INVENTARIO (POR PANTALLAS <-> COMPLETA) */}
+      {convertingAccount && (
+        <div className="fixed inset-0 z-[10010] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-900 border border-gray-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0 bg-gray-900/95">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <ArrowLeftRight className="w-4 h-4 text-emerald-400" />
+                <span>Conversión Dinámica de Inventario (Liquidez 100%)</span>
+              </h3>
+              <button
+                onClick={() => setConvertingAccount(null)}
+                className="text-gray-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConvertInventory} className="p-5 space-y-4 text-xs">
+              <div className="p-3 bg-indigo-950/30 border border-indigo-800/40 rounded-xl space-y-1">
+                <div className="text-indigo-200">
+                  Cuenta Raíz: <strong className="text-white font-mono">{convertingAccount.email}</strong>
+                </div>
+                <div className="text-gray-400 text-[11px]">
+                  Servicio: <strong className="text-gray-200">{convertingAccount.service?.nombre || 'Streaming'}</strong> | Unidades de venta actuales: <strong className="text-gray-200">{convertingAccount.accounts?.length || 0}</strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1.5">
+                  Modalidad Objetivo de Venta
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConvertTargetType('POR_PANTALLA')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      convertTargetType === 'POR_PANTALLA'
+                        ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                        : 'bg-gray-950 border-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <div className="font-bold text-xs">A Pantallas Individuales</div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">
+                      Divide la cuenta en {convertingAccount.maxPantallas || 5} perfiles independientes.
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setConvertTargetType('COMPLETA')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      convertTargetType === 'COMPLETA'
+                        ? 'bg-emerald-600/20 border-emerald-500 text-white'
+                        : 'bg-gray-950 border-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <div className="font-bold text-xs">A Cuenta Completa</div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">
+                      Agrupa el inventario en 1 sola unidad mayorista para un único comprador.
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">
+                  Plan de Catálogo Destino <span className="text-emerald-400">*</span>
+                </label>
+                <select
+                  required
+                  value={convertTargetPlanId}
+                  onChange={(e) => setConvertTargetPlanId(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
+                >
+                  <option value="">Selecciona el plan correspondiente en el catálogo</option>
+                  {plans
+                    .filter((pl) => !convertingAccount.serviceId || pl.serviceId === convertingAccount.serviceId)
+                    .map((pl) => (
+                      <option key={pl.id} value={pl.id}>
+                        {pl.service?.nombre || 'Streaming'} - {pl.nombrePlan} ({pl.pantallasSimultaneas || 1} {pl.pantallasSimultaneas === 1 ? 'pantalla' : 'pantallas'}) - ${Number(pl.precio).toLocaleString()}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  * Solo se permite la conversión si ninguno de los perfiles actuales tiene clientes con suscripción activa.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setConvertingAccount(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={formLoading}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Ejecutar Conversión</span>
                 </button>
               </div>
             </form>

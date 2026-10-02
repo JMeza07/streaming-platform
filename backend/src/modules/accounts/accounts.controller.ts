@@ -56,6 +56,9 @@ export class AccountsController {
       password: string;
       serviceId?: string;
       providerId?: string;
+      planId?: string;
+      tipoVenta?: 'POR_PANTALLA' | 'COMPLETA';
+      generateProfiles?: boolean;
       fechaVencimientoRaiz?: string;
       costoCompra?: number;
       maxPerfiles?: number;
@@ -105,6 +108,17 @@ export class AccountsController {
     @Request() req: any,
   ) {
     return this.accountsService.confirmPasswordRotation(id, body.newPassword, req.user);
+  }
+
+  // ESCENARIO 12: CONVERSIÓN DINÁMICA DE INVENTARIO (POR PANTALLAS <-> COMPLETA)
+  @Post('root-accounts/:id/convert-inventory')
+  @Roles(UserRole.ADMIN)
+  convertInventory(
+    @Param('id') id: string,
+    @Body() body: { targetType: 'POR_PANTALLA' | 'COMPLETA'; targetPlanId: string },
+    @Request() req: any,
+  ) {
+    return this.accountsService.convertInventoryType(id, body.targetType, body.targetPlanId, req.user);
   }
 
   // ESCENARIO 10: OPTIMIZACIÓN DE INVENTARIO / BIN PACKING
