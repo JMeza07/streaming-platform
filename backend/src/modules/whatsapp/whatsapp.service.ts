@@ -38,25 +38,26 @@ export class WhatsappService {
   // ENVIAR MENSAJE DE TEXTO SIMPLE
   async sendTextMessage(numero: string, mensaje: string, forceSend: boolean = false) {
     try {
-      const cleanNumber = numero.replace(/\D/g, '');
+      const isJid = numero.includes('@');
+      const targetNumber = isJid ? numero.trim() : numero.replace(/\D/g, '');
 
       // Validar horario de envío si no es forzado (ej: entregas inmediatas de compras)
       if (!forceSend && !(await this.isWithinSendingHours())) {
-        this.logger.warn(`Mensaje a ${cleanNumber} encolado (fuera de horario)`);
-        await this.enqueueMessage(cleanNumber, mensaje, 'texto');
+        this.logger.warn(`Mensaje a ${targetNumber} encolado (fuera de horario)`);
+        await this.enqueueMessage(targetNumber, mensaje, 'texto');
         return { success: false, message: 'Mensaje encolado (fuera de horario)' };
       }
 
       const response = await this.evolutionApi.post(
         `/message/sendText/${this.instanceName}`,
         {
-          number: cleanNumber,
+          number: targetNumber,
           text: mensaje,
         },
       );
 
       // Registrar en logs
-      await this.logNotification(cleanNumber, mensaje, 'whatsapp', 'enviado');
+      await this.logNotification(targetNumber, mensaje, 'whatsapp', 'enviado');
 
       return { success: true, data: response.data };
     } catch (error) {
@@ -69,26 +70,61 @@ export class WhatsappService {
   // ENVIAR MENSAJE CON IMAGEN
   async sendImageMessage(numero: string, imagenUrl: string, caption: string) {
     try {
+      const isJid = numero.includes('@');
+      const targetNumber = isJid ? numero.trim() : numero.replace(/\D/g, '');
+
       if (!(await this.isWithinSendingHours())) {
-        await this.enqueueMessage(numero, caption, 'imagen', imagenUrl);
+        await this.enqueueMessage(targetNumber, caption, 'imagen', imagenUrl);
         return { success: false, message: 'Mensaje encolado (fuera de horario)' };
       }
 
       const response = await this.evolutionApi.post(
         `/message/sendMedia/${this.instanceName}`,
         {
-          number: numero,
+          number: targetNumber,
           mediatype: 'image',
           mediaUrl: imagenUrl,
           caption: caption,
         },
       );
 
-      await this.logNotification(numero, caption, 'whatsapp', 'enviado');
+      await this.logNotification(targetNumber, caption, 'whatsapp', 'enviado');
       return { success: true, data: response.data };
     } catch (error) {
       this.logger.error(`Error enviando imagen a ${numero}:`, error.message);
       throw new BadRequestException('Error al enviar imagen por WhatsApp');
+    }
+  }
+
+  // EXTRAER BASE64 DE UN MENSAJE MULTIMEDIA DESDE EVOLUTION API
+  async getBase64FromMedia(messageData: any): Promise<{ base64?: string; mimetype?: string } | null> {
+    try {
+      const payload = {
+        message: {
+          key: messageData.key || {},
+          message: messageData.message || {},
+        },
+        convertToMp4: false,
+      };
+
+      const response = await this.evolutionApi.post(
+        `/chat/getBase64FromMediaMessage/${this.instanceName}`,
+        payload,
+      );
+
+      const base64 = response.data?.base64 || response.data?.data?.base64;
+      const mimetype = response.data?.mimetype || response.data?.data?.mimetype || 'image/jpeg';
+
+      if (base64) {
+        return {
+          base64,
+          mimetype,
+        };
+      }
+      return null;
+    } catch (err: any) {
+      this.logger.warn(`No se pudo obtener base64 de media desde Evolution API: ${err.message}`);
+      return null;
     }
   }
 
@@ -99,15 +135,18 @@ export class WhatsappService {
     botones: { texto: string; id: string }[],
   ) {
     try {
+      const isJid = numero.includes('@');
+      const targetNumber = isJid ? numero.trim() : numero.replace(/\D/g, '');
+
       if (!(await this.isWithinSendingHours())) {
-        await this.enqueueMessage(numero, mensaje, 'botones');
+        await this.enqueueMessage(targetNumber, mensaje, 'botones');
         return { success: false, message: 'Mensaje encolado (fuera de horario)' };
       }
 
       const response = await this.evolutionApi.post(
         `/message/sendButtons/${this.instanceName}`,
         {
-          number: numero,
+          number: targetNumber,
           text: mensaje,
           buttons: botones.map((b) => ({
             buttonId: b.id,
@@ -117,7 +156,7 @@ export class WhatsappService {
         },
       );
 
-      await this.logNotification(numero, mensaje, 'whatsapp', 'enviado');
+      await this.logNotification(targetNumber, mensaje, 'whatsapp', 'enviado');
       return { success: true, data: response.data };
     } catch (error) {
       this.logger.error(`Error enviando botones a ${numero}:`, error.message);
@@ -140,7 +179,7 @@ export class WhatsappService {
 
     // Reemplazar variables
     mensaje = mensaje.replace('{nombre_cliente}', nombreCliente);
-    mensaje = mensaje.replace('{nombre_marca}', 'Tu Marca');
+    mensaje = mensaje.replace('{nombre_marca}', config.nombreRemitente || 'MezaStreaming');
 
     // Construir lista de cuentas
     let cuentasTexto = '';
@@ -213,7 +252,7 @@ export class WhatsappService {
       config = await this.prisma.whatsappConfig.create({
         data: {
           nombreConfig: 'Principal',
-          nombreRemitente: systemSetting?.nombrePlataforma || 'StreamControl',
+          nombreRemitente: systemSetting?.nombrePlataforma || 'MezaStreaming',
           numeroWhatsapp: systemSetting?.whatsappSoporte || '+573001234567',
           zonaHoraria: 'America/Bogota',
           horaInicio: '09:00:00',
@@ -230,7 +269,7 @@ export class WhatsappService {
       config = await this.prisma.whatsappConfig.update({
         where: { id: config.id },
         data: {
-          nombreRemitente: config.nombreRemitente || systemSetting.nombrePlataforma || 'StreamControl',
+          nombreRemitente: config.nombreRemitente || systemSetting.nombrePlataforma || 'MezaStreaming',
           numeroWhatsapp: config.numeroWhatsapp || systemSetting.whatsappSoporte || '+573001234567',
         },
       });
@@ -259,7 +298,7 @@ export class WhatsappService {
           create: {
             id: 'singleton',
             whatsappSoporte: data.numeroWhatsapp || '+573001234567',
-            nombrePlataforma: data.nombreRemitente || 'StreamControl',
+            nombrePlataforma: data.nombreRemitente || 'MezaStreaming',
           },
         });
       } catch (err: any) {
@@ -268,6 +307,163 @@ export class WhatsappService {
     }
 
     return updated;
+  }
+
+  // ============================================
+  // GESTIÓN DE CONFIGURACIÓN DEL CHATBOT IA
+  // ============================================
+
+  // OBTENER CONFIGURACIÓN DEL CHATBOT
+  async getChatbotConfig(): Promise<any> {
+    const config = await this.getConfig();
+    const raw = (config as any).chatbotConfig || {};
+
+    return {
+      activo: raw.activo !== false,
+      nombreBot: raw.nombreBot || 'StreamBot',
+      modoOperacion: raw.modoOperacion || 'hybrid', // hybrid, menu_only, ai_only
+      palabrasClaveMenu: Array.isArray(raw.palabrasClaveMenu) && raw.palabrasClaveMenu.length > 0
+        ? raw.palabrasClaveMenu
+        : ['menu', 'hola', 'inicio', 'bot', 'ayuda'],
+      takeoverHumanoActivo: raw.takeoverHumanoActivo !== false,
+      tiempoExpiracionSesionMin: raw.tiempoExpiracionSesionMin || 30,
+
+      // Módulos
+      moduloCatalogoActivo: raw.moduloCatalogoActivo !== false,
+      moduloCuentasActivo: raw.moduloCuentasActivo !== false,
+      moduloGarantiaActivo: raw.moduloGarantiaActivo !== false,
+      moduloRegistroActivo: raw.moduloRegistroActivo !== false,
+      moduloVentasActivo: raw.moduloVentasActivo !== false,
+
+      // Anti-Baneo & Control de Números (Protección WhatsApp)
+      antiBanActivo: raw.antiBanActivo !== false,
+      delayMinMs: raw.delayMinMs ?? 1500,
+      delayMaxMs: raw.delayMaxMs ?? 3500,
+      simularTipeo: raw.simularTipeo !== false,
+      maxMensajesPorMinutoPorUsuario: raw.maxMensajesPorMinutoPorUsuario ?? 8,
+      modoListaBlanca: Boolean(raw.modoListaBlanca),
+      numerosAutorizados: Array.isArray(raw.numerosAutorizados) ? raw.numerosAutorizados : [],
+      numerosBloqueados: Array.isArray(raw.numerosBloqueados) ? raw.numerosBloqueados : [],
+
+      // Reglas de Negocio
+      reglaStock10Min: raw.reglaStock10Min !== false,
+      reglaPrivacidadEstricta: raw.reglaPrivacidadEstricta !== false,
+      reglaRegistroPromociones: raw.reglaRegistroPromociones !== false,
+      reglaVentasSimplificada: raw.reglaVentasSimplificada !== false,
+
+      // Ollama LLM
+      ollamaUrl: raw.ollamaUrl || this.configService.get<string>('OLLAMA_URL', 'http://localhost:11434'),
+      ollamaModel: raw.ollamaModel || this.configService.get<string>('OLLAMA_MODEL', 'qwen2.5:7b'),
+      temperatura: typeof raw.temperatura === 'number' ? raw.temperatura : 0.5,
+      maxTokens: typeof raw.maxTokens === 'number' ? raw.maxTokens : 350,
+      systemPromptPersonalizado:
+        raw.systemPromptPersonalizado ||
+        'Saluda siempre con calidez y profesionalismo.\n' +
+        '1. VERACIDAD TOTAL: Jamás inventes plataformas ni precios fuera del catálogo suministrado.\n' +
+        '2. STOCK Y 10 MINUTOS: Si un servicio no tiene stock inmediato, indica que se lo gestionamos y activamos en un plazo máximo de no más de 10 minutos tras confirmar su pago.\n' +
+        '3. CLIENTES NUEVOS: Invítalos a registrarse para obtener promociones y descuentos. Solicita únicamente nombre completo y correo electrónico.\n' +
+        '4. VENTAS Y PAGOS: Menciona únicamente Nequi, Daviplata o Bancolombia, y pide captura del comprobante de transferencia.\n' +
+        '5. GARANTÍA: Recuerda que todas las cuentas tienen garantía total siempre que no alteren correo ni contraseña.\n' +
+        '6. Responde en máximo 2 a 3 párrafos cortos, con negritas y emojis estratégicos.',
+      contextoAdicional:
+        raw.contextoAdicional ||
+        '- Pagos oficiales: Nequi, Daviplata y Bancolombia (solicitar comprobante para despacho).\n' +
+        '- Horario de atención humana: 8:00 AM a 10:00 PM. El bot opera 24/7.\n' +
+        '- Garantía: 100% durante el tiempo contratado. No cambiar correo ni clave maestra.\n' +
+        '- Compromiso de entrega: Cuentas sin stock inmediato se activan en un máximo de 10 minutos.',
+      faqs: Array.isArray(raw.faqs) && raw.faqs.length > 0 ? raw.faqs : [
+        {
+          id: 'faq-1',
+          pregunta: '¿Cuáles son los métodos de pago aceptados?',
+          respuesta: 'Aceptamos transferencias bancarias por Nequi, Daviplata y Bancolombia. Una vez realizada la transferencia, nos envías el comprobante para entrega inmediata.',
+          activo: true,
+        },
+        {
+          id: 'faq-2',
+          pregunta: '¿Qué garantía tienen las cuentas?',
+          respuesta: 'Todas nuestras pantallas cuentan con garantía total durante el periodo contratado, siempre y cuando no se modifiquen correos ni contraseñas.',
+          activo: true,
+        },
+        {
+          id: 'faq-3',
+          pregunta: '¿Qué pasa si una cuenta no tiene entrega inmediata?',
+          respuesta: 'Te la gestionamos y activamos en un plazo máximo de no más de 10 minutos tras confirmar tu pedido.',
+          activo: true,
+        },
+        {
+          id: 'faq-4',
+          pregunta: '¿Puedo comprar siendo cliente nuevo?',
+          respuesta: '¡Por supuesto! Te registramos en solo 30 segundos con tu nombre y correo para que aproveches descuentos especiales y garantía oficial.',
+          activo: true,
+        },
+      ],
+      promptsPersonalizados: Array.isArray(raw.promptsPersonalizados) ? raw.promptsPersonalizados : [
+        {
+          id: 'prompt-1',
+          titulo: '1. Veracidad Estricta & Cero Alucinación',
+          categoria: 'anti_alucinacion',
+          contenido:
+            'NUNCA inventes plataformas, precios, enlaces de pago ficticios ni cuentas que no figuren explícitamente en el catálogo suministrado. Si el cliente solicita información que no posees, responde honestamente: "En este momento no tengo esa información exacta en catálogo, pero con gusto te comunico con un asesor humano para ayudarte."',
+          activo: true,
+        },
+        {
+          id: 'prompt-2',
+          titulo: '2. Identificación Única por Número de WhatsApp',
+          categoria: 'cuentas',
+          contenido:
+            'Los clientes en el sistema se identifican y consultan ÚNICAMENTE por su número telefónico de WhatsApp emisor, NUNCA por su nombre. Solo puedes consultar y revelar cuentas, contraseñas o pedidos asociados estrictamente al número de WhatsApp desde el cual te escriben. Jamás muestres datos de terceros.',
+          activo: true,
+        },
+        {
+          id: 'prompt-3',
+          titulo: '3. Regla de Stock & Compromiso de 10 Minutos',
+          categoria: 'ventas',
+          contenido:
+            'Si el cliente pregunta por un servicio o pantalla que tiene stock disponible, confirma entrega inmediata tras el pago. Si el servicio NO tiene stock inmediato o está agotado, DEBES indicar con total amabilidad y seguridad: "Actualmente no contamos con entrega inmediata para este servicio, pero no te preocupes: te la gestionamos y activamos en un plazo máximo de no más de 10 minutos garantizado tras confirmar tu compra." NUNCA digas que no vendemos una cuenta si está en el catálogo.',
+          activo: true,
+        },
+        {
+          id: 'prompt-4',
+          titulo: '4. Captación y Registro de Clientes Nuevos',
+          categoria: 'ventas',
+          contenido:
+            'Si el cliente no está registrado en el sistema, invítalo con entusiasmo a registrarse para acceder a descuentos exclusivos en renovaciones, promociones y respaldo de garantía. Para registrarlo, solicita únicamente su Nombre completo y Correo electrónico (su teléfono ya es su WhatsApp actual). Si es cliente antiguo, salúdalo por su nombre y continúa con su compra sin pedirle datos redundantes.',
+          activo: true,
+        },
+        {
+          id: 'prompt-5',
+          titulo: '5. Flujo de Ventas y Medios de Pago Oficiales',
+          categoria: 'ventas',
+          contenido:
+            'Para cobros y ventas, menciona ÚNICAMENTE los métodos oficiales: Nequi, Daviplata o Bancolombia. Indica el valor total exacto en pesos colombianos ($ COP) y solicita siempre la captura o comprobante de la transferencia para procesar la entrega. No inventes otros bancos, PayPal ni tarjetas directas.',
+          activo: true,
+        },
+        {
+          id: 'prompt-6',
+          titulo: '6. Términos de Garantía y Soporte Técnico',
+          categoria: 'garantias',
+          contenido:
+            'Todas las cuentas y pantallas cuentan con garantía total durante el periodo contratado (30 días). La única condición indispensable para mantener la garantía es que el cliente no debe modificar el correo electrónico de la cuenta ni la contraseña maestra. Para soporte o caídas, pide el correo de la cuenta y foto del error.',
+          activo: true,
+        },
+      ],
+    };
+  }
+
+  // ACTUALIZAR CONFIGURACIÓN DEL CHATBOT
+  async updateChatbotConfig(newConfig: any) {
+    const config = await this.getConfig();
+    const current = await this.getChatbotConfig();
+    const merged = { ...current, ...newConfig };
+
+    await this.prisma.whatsappConfig.update({
+      where: { id: config.id },
+      data: {
+        chatbotConfig: merged,
+      },
+    });
+
+    return merged;
   }
 
   // ACTIVAR/DESACTIVAR NOTIFICACIONES
@@ -375,6 +571,34 @@ export class WhatsappService {
     } catch (error) {
       this.logger.error('Error cerrando sesión de WhatsApp:', error.message);
       throw new BadRequestException('Error al desconectar la sesión de WhatsApp');
+    }
+  }
+
+  // CONFIGURAR WEBHOOK EN EVOLUTION API
+  async configureWebhook(targetUrl?: string) {
+    try {
+      const webhookUrl =
+        targetUrl ||
+        this.configService.get<string>('WHATSAPP_WEBHOOK_URL') ||
+        'http://host.docker.internal:3001/api/whatsapp/webhook';
+
+      const response = await this.evolutionApi.post(`/webhook/set/${this.instanceName}`, {
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          byEvents: false,
+          base64: false,
+          events: [
+            'MESSAGES_UPSERT',
+            'CONNECTION_UPDATE',
+          ],
+        },
+      });
+      this.logger.log(`Webhook configurado exitosamente en Evolution API hacia ${webhookUrl}`);
+      return { success: true, data: response.data, webhookUrl };
+    } catch (error) {
+      this.logger.error('Error configurando webhook en Evolution API:', error.message);
+      return { success: false, error: error.message };
     }
   }
 

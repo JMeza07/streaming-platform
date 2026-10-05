@@ -177,7 +177,7 @@ export class SubscriptionsService {
       items = items.filter(
         (i) =>
           i.clienteNombre.toLowerCase().includes(q) ||
-          i.clienteEmail.toLowerCase().includes(q) ||
+          (i.clienteEmail && i.clienteEmail.toLowerCase().includes(q)) ||
           i.emailCuenta.toLowerCase().includes(q) ||
           i.plataformaNombre.toLowerCase().includes(q) ||
           i.planNombre.toLowerCase().includes(q) ||

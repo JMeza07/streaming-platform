@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title StreamControl Platform - Iniciando Servidores...
+title MezaStreaming Platform - Iniciando Servidores...
 
 echo ======================================================================
 echo           🚀 STREAMING PLATFORM - INICIO DE SERVIDORES 🚀
@@ -44,6 +44,7 @@ echo ======================================================================
 echo   * Frontend Web:       http://localhost:3000
 echo   * Backend API:        http://localhost:3001/api
 echo   * Evolution API (WA): http://localhost:8080
+echo   * Ollama IA Local:    http://localhost:11434
 echo ======================================================================
 echo Para detener los servicios puedes ejecutar: stop.bat
 echo.

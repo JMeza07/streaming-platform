@@ -199,7 +199,7 @@ export class CustomersService {
       items = items.filter(
         (c) =>
           c.nombre.toLowerCase().includes(term) ||
-          c.email.toLowerCase().includes(term) ||
+          (c.email && c.email.toLowerCase().includes(term)) ||
           c.telefono.includes(term) ||
           c.pais.toLowerCase().includes(term) ||
           c.cuentas?.some(

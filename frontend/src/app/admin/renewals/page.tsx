@@ -229,37 +229,40 @@ export default function RenewalsPage() {
     if (order.comprobanteUrl) {
       setZoomedImage(order.comprobanteUrl);
     }
-    if (!order.comprobanteVerificado && !verifiedReceiptOrders[order.id]) {
+    const isAlreadyVerified = Boolean(order.comprobanteVerificado || verifiedReceiptOrders[order.id]);
+    if (!isAlreadyVerified) {
       try {
         await api.patch(`/orders/${order.id}/verify-receipt`);
-        setVerifiedReceiptOrders((prev) => ({ ...prev, [order.id]: true }));
-        setRenewals((prev) =>
-          prev.map((o) =>
-            o.id === order.id
-              ? {
-                  ...o,
-                  comprobanteVerificado: true,
-                  comprobanteVerificadoAt: new Date().toISOString(),
-                  comprobanteVerificadoPor: 'Personal Autorizado',
-                }
-              : o
-          )
-        );
-        if (viewingDetailOrder && viewingDetailOrder.id === order.id) {
-          setViewingDetailOrder((prev: any) =>
-            prev
-              ? {
-                  ...prev,
-                  comprobanteVerificado: true,
-                  comprobanteVerificadoAt: new Date().toISOString(),
-                  comprobanteVerificadoPor: 'Personal Autorizado',
-                }
-              : null
-          );
-        }
       } catch (err) {
         console.error('Error al marcar comprobante de renovación como verificado:', err);
       }
+      setVerifiedReceiptOrders((prev) => ({ ...prev, [order.id]: true }));
+      setRenewals((prev) =>
+        prev.map((o) =>
+          o.id === order.id
+            ? {
+                ...o,
+                comprobanteVerificado: true,
+                comprobanteVerificadoAt: new Date().toISOString(),
+                comprobanteVerificadoPor: 'Personal Autorizado',
+              }
+            : o
+        )
+      );
+      if (viewingDetailOrder && viewingDetailOrder.id === order.id) {
+        setViewingDetailOrder((prev: any) =>
+          prev
+            ? {
+                ...prev,
+                comprobanteVerificado: true,
+                comprobanteVerificadoAt: new Date().toISOString(),
+                comprobanteVerificadoPor: 'Personal Autorizado',
+              }
+            : null
+        );
+      }
+    } else {
+      setVerifiedReceiptOrders((prev) => ({ ...prev, [order.id]: true }));
     }
   };
 

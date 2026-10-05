@@ -29,9 +29,11 @@ import {
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import TablePagination from '@/components/TablePagination';
 import { useDialog } from '@/components/Dialog';
+import { useSettings } from '@/context/SettingsContext';
 
 export default function AffiliatesPage() {
   const { alert, confirm } = useDialog();
+  const { systemName } = useSettings();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [affiliates, setAffiliates] = useState<any[]>([]);
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
@@ -301,7 +303,7 @@ export default function AffiliatesPage() {
     if (activeTab === 'affiliates') {
       triggerPrintReport({
         title: 'Red Oficial de Afiliados y Revendedores',
-        subtitle: `STREAMCONTROL - Listado general de la fuerza comercial y saldos acumulados`,
+        subtitle: `${systemName || 'MezaStreaming'} - Listado general de la fuerza comercial y saldos acumulados`,
         summaryCards: [
           { label: 'Total Vendedores', value: affiliates.length },
           {
@@ -328,7 +330,7 @@ export default function AffiliatesPage() {
     } else {
       triggerPrintReport({
         title: 'Historial de Solicitudes de Retiro de Comisiones',
-        subtitle: `STREAMCONTROL - Auditoría de desembolsos y pagos a vendedores`,
+        subtitle: `${systemName || 'MezaStreaming'} - Auditoría de desembolsos y pagos a vendedores`,
         columns: [
           { key: 'vendedor', label: 'Vendedor', format: (_, r) => r.affiliate?.user?.nombre || 'N/A' },
           { key: 'monto', label: 'Monto', format: (m) => `$${Number(m).toLocaleString('es-CO')}` },

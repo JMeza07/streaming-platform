@@ -46,6 +46,7 @@ Write-Host "====================================================================
 Write-Host "  * Frontend Web:       http://localhost:3000" -ForegroundColor White
 Write-Host "  * Backend API:        http://localhost:3001/api" -ForegroundColor White
 Write-Host "  * Evolution API (WA): http://localhost:8080" -ForegroundColor White
+Write-Host "  * Ollama IA Local:    http://localhost:11434" -ForegroundColor White
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host 'Para detener los servicios puedes ejecutar: .\stop.ps1 o stop.bat' -ForegroundColor Gray
 Write-Host ""

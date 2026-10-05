@@ -25,6 +25,7 @@ services:
       # Identidad de WhatsApp
       - CONFIG_SESSION_PHONE_CLIENT=StreamControl
       - CONFIG_SESSION_PHONE_NAME=StreamControl Bot
+      - WPP_LID_MODE=false
 
       # Base de datos PostgreSQL dedicada (Aislada en red interna)
       - DATABASE_ENABLED=true
@@ -64,8 +65,22 @@ services:
     volumes:
       - evolution_postgres_data:/var/lib/postgresql/data
 
+  # =======================================================
+  # 3. MOTOR DE IA LOCAL (OLLAMA - SIN COSTO DE TOKENS)
+  # =======================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: streamcontrol-ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+
 volumes:
   evolution_instances:
     name: streamcontrol_evolution_instances
   evolution_postgres_data:
     name: streamcontrol_evolution_postgres_data
+  ollama_models:
+    name: streamcontrol_ollama_models

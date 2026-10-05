@@ -29,7 +29,7 @@ interface SettingsContextValue {
 }
 
 const defaultSettings: SystemSettings = {
-  nombrePlataforma: 'STREAMCONTROL',
+  nombrePlataforma: 'MezaStreaming',
   logoUrl: null,
   whatsappSoporte: '+57 300 123 4567',
   moneda: 'COP',
@@ -41,7 +41,7 @@ const defaultSettings: SystemSettings = {
 };
 
 const SettingsContext = createContext<SettingsContextValue>({
-  systemName: 'STREAMCONTROL',
+  systemName: 'MezaStreaming',
   systemLogo: null,
   settings: defaultSettings,
   loading: true,
@@ -62,7 +62,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
   const [loading, setLoading] = useState(true);
 
-  const systemName = settings.nombrePlataforma || 'STREAMCONTROL';
+  const systemName = settings.nombrePlataforma || 'MezaStreaming';
   const systemLogo = settings.logoUrl || null;
 
   const refreshSettings = useCallback(async () => {
@@ -71,7 +71,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (res.data) {
         setSettings({
           ...res.data,
-          nombrePlataforma: res.data.nombrePlataforma || 'STREAMCONTROL',
+          nombrePlataforma: res.data.nombrePlataforma || 'MezaStreaming',
           logoUrl: res.data.logoUrl || null,
         });
       }

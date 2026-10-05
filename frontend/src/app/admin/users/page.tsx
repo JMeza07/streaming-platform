@@ -45,6 +45,7 @@ import {
   BarChart3,
   Truck,
   Settings,
+  Bot,
 } from 'lucide-react';
 import TablePagination from '@/components/TablePagination';
 
@@ -931,6 +932,7 @@ export default function UsersAndRolesPage() {
                   <tbody className="divide-y divide-gray-800/60 text-sm">
                     {paginatedUsers.map((user) => {
                       const isSelf = currentUser?.id === user.id;
+                      const isBot = user.email.includes('bot@') || user.nombre.toLowerCase().includes('bot');
                       const initials = user.nombre
                         .split(' ')
                         .map((n) => n[0])
@@ -948,14 +950,16 @@ export default function UsersAndRolesPage() {
                             <div className="flex items-center gap-3">
                               <div
                                 className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold text-white shadow-inner ${
-                                  user.rol === 'ADMIN'
+                                  isBot
+                                    ? 'bg-gradient-to-tr from-purple-600 to-indigo-500 shadow-purple-500/20'
+                                    : user.rol === 'ADMIN'
                                     ? 'bg-gradient-to-tr from-red-600 to-rose-500'
                                     : user.rol === 'SOPORTE'
                                     ? 'bg-gradient-to-tr from-blue-600 to-cyan-500'
                                     : 'bg-gradient-to-tr from-emerald-600 to-teal-500'
                                 }`}
                               >
-                                {initials}
+                                {isBot ? <Bot className="w-5 h-5 text-white" /> : initials}
                               </div>
                               <div>
                                 <div className="flex items-center gap-2">
@@ -963,6 +967,12 @@ export default function UsersAndRolesPage() {
                                   {isSelf && (
                                     <span className="text-[10px] px-1.5 py-0.5 bg-red-500/20 text-red-300 rounded font-semibold border border-red-500/30">
                                       Tú (Sesión)
+                                    </span>
+                                  )}
+                                  {isBot && (
+                                    <span className="text-[10px] px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded font-semibold border border-purple-500/30 flex items-center gap-1">
+                                      <Bot className="w-3 h-3 text-purple-400" />
+                                      <span>Asistente IA</span>
                                     </span>
                                   )}
                                 </div>

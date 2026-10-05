@@ -3,21 +3,35 @@ import { JwtService } from '@nestjs/jwt';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import { toDataURL } from 'qrcode';
 import { UserRole } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class TwoFactorService {
   private readonly logger = new Logger(TwoFactorService.name);
-  private readonly appName = 'StreamControl';
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  private async getIssuer(): Promise<string> {
+    try {
+      const setting = await this.prisma.systemSetting.findFirst();
+      if (setting?.nombrePlataforma && setting.nombrePlataforma.trim().length > 0) {
+        return setting.nombrePlataforma.trim();
+      }
+    } catch {}
+    return 'MezaStreaming';
+  }
 
   /**
    * Generates a new TOTP secret and a Base64 QR code image for Google Authenticator
    */
   async generateSecret(email: string): Promise<{ secret: string; otpauthUrl: string; qrCode: string }> {
+    const issuer = await this.getIssuer();
     const secret = generateSecret();
     const otpauthUrl = generateURI({
-      issuer: this.appName,
+      issuer,
       label: email,
       secret,
     });

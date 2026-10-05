@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import TablePagination from '@/components/TablePagination';
 import { useDialog } from '@/components/Dialog';
+import { useSettings } from '@/context/SettingsContext';
 
 const NORMAS_USO_TEXT = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋 NORMAS DE USO Y CONDICIONES
@@ -69,6 +70,7 @@ Gracias por confiar en nuestros servicios. 🙏
 
 export default function ClientDashboardPage() {
   const { alert } = useDialog();
+  const { systemName } = useSettings();
   const [summary, setSummary] = useState<any>(null);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
@@ -1936,7 +1938,7 @@ export default function ClientDashboardPage() {
                             banco: 'Nequi',
                             tipoCuenta: 'Billetera Digital',
                             numeroCuenta: '3001234567',
-                            titular: 'StreamControl Pagos',
+                            titular: `${systemName || 'MezaStreaming'} Pagos`,
                             documento: 'CC 1.098.765.432',
                             instrucciones: 'Envía a Nequi directamente. Adjunta tu soporte tras realizarlo.',
                           },
@@ -1945,7 +1947,7 @@ export default function ClientDashboardPage() {
                             banco: 'Bancolombia',
                             tipoCuenta: 'Cuenta de Ahorros',
                             numeroCuenta: '912-000123-45',
-                            titular: 'StreamControl SAS',
+                            titular: `${systemName || 'MezaStreaming'} SAS`,
                             documento: 'NIT 901.234.567-8',
                             instrucciones: 'Transferencia directa desde App Bancolombia o QR sin costo.',
                           },
@@ -1954,7 +1956,7 @@ export default function ClientDashboardPage() {
                             banco: 'Daviplata',
                             tipoCuenta: 'Billetera Digital',
                             numeroCuenta: '3001234567',
-                            titular: 'StreamControl Pagos',
+                            titular: `${systemName || 'MezaStreaming'} Pagos`,
                             documento: 'CC 1.098.765.432',
                             instrucciones: 'Acepta transferencias directas de Daviplata o vía Transfiya.',
                           },
@@ -4157,7 +4159,7 @@ export default function ClientDashboardPage() {
                   className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="Transferencia Bancaria">Transferencia Bancaria / Nequi / Daviplata</option>
-                  <option value="Saldo en Billetera">Saldo en Billetera StreamControl</option>
+                  <option value="Saldo en Billetera">{`Saldo en Billetera ${systemName || 'MezaStreaming'}`}</option>
                   <option value="Efectivo">Efectivo / Punto de Venta</option>
                 </select>
               </div>

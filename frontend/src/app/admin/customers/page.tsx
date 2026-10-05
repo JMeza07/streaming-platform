@@ -741,8 +741,13 @@ export default function CustomersManagementPage() {
           <table className="w-full text-left border-collapse table-auto">
             <thead>
               <tr className="border-b border-gray-850 bg-gray-900/60 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                <th className="py-2.5 px-3 rounded-tl-2xl">Cliente</th>
-                <th className="py-2.5 px-2">Contacto & WhatsApp</th>
+                <th className="py-2.5 px-3 rounded-tl-2xl">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-extrabold">
+                    <KeyRound className="w-3 h-3 text-amber-400" />
+                    <span>WhatsApp (Clave Principal)</span>
+                  </div>
+                </th>
+                <th className="py-2.5 px-3">Cliente</th>
                 <th className="py-2.5 px-2">Billetera</th>
                 <th className="py-2.5 px-2 text-center">Strikes</th>
                 <th className="py-2.5 px-2">Ubicación</th>
@@ -781,6 +786,53 @@ export default function CustomersManagementPage() {
                       }`}
                       onClick={() => openDetailModal(cust)}
                     >
+                      {/* WhatsApp / Teléfono (Clave Principal) */}
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                            PK
+                          </span>
+                          {phoneNum ? (
+                            <div className="flex items-center gap-1">
+                              <a
+                                href={`https://wa.me/${cleanPhone}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-800/50 text-emerald-300 font-mono font-bold text-xs transition-colors"
+                              >
+                                <Phone className="w-3 h-3 text-emerald-400" />
+                                <span>{phoneNum}</span>
+                                <ExternalLink className="w-2.5 h-2.5 text-emerald-400/70 ml-0.5" />
+                              </a>
+                              <div className="relative group/tooltip inline-flex items-center">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCopy(phoneNum, `ph-${cust.id}`);
+                                  }}
+                                  className="text-gray-500 hover:text-white p-1 cursor-pointer transition-colors"
+                                >
+                                  {copiedId === `ph-${cust.id}` ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover/tooltip:opacity-100 transition-opacity duration-150 pointer-events-none z-50 flex flex-col items-center">
+                                  <div className="bg-gray-900 border border-gray-700 text-white text-[11px] font-semibold py-1 px-2.5 rounded-lg shadow-2xl whitespace-nowrap">
+                                    Copiar clave/teléfono
+                                  </div>
+                                  <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-700 -mt-[1px]"></div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-gray-500 italic text-[11px]">Sin teléfono</span>
+                          )}
+                        </div>
+                      </td>
+
                       {/* Cliente */}
                       <td className="py-2 px-3">
                         <div className="flex items-center gap-2">
@@ -797,48 +849,6 @@ export default function CustomersManagementPage() {
                             </div>
                           </div>
                         </div>
-                      </td>
-
-                      {/* Contacto & WhatsApp */}
-                      <td className="py-2 px-2 whitespace-nowrap">
-                        {phoneNum ? (
-                          <div className="flex items-center gap-1">
-                            <a
-                              href={`https://wa.me/${cleanPhone}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800/40 text-emerald-300 font-mono text-[10px] transition-colors"
-                            >
-                              <Phone className="w-2.5 h-2.5 text-emerald-400" />
-                              <span>{phoneNum}</span>
-                              <ExternalLink className="w-2 h-2 text-emerald-400/70 ml-0.5" />
-                            </a>
-                            <div className="relative group/tooltip inline-flex items-center">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleCopy(phoneNum, `ph-${cust.id}`);
-                                }}
-                                className="text-gray-500 hover:text-white p-1 cursor-pointer transition-colors"
-                              >
-                                {copiedId === `ph-${cust.id}` ? (
-                                  <Check className="w-3 h-3 text-emerald-400" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
-                                )}
-                              </button>
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 opacity-0 group-hover/tooltip:opacity-100 transition-opacity duration-150 pointer-events-none z-50 flex flex-col items-center">
-                                <div className="bg-gray-900 border border-gray-700 text-white text-[10px] font-semibold py-0.5 px-2 rounded shadow-2xl whitespace-nowrap">
-                                  {copiedId === `ph-${cust.id}` ? '¡Copiado!' : 'Copiar teléfono'}
-                                </div>
-                                <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-700 -mt-[1px]"></div>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-gray-500 italic text-[10px]">Sin teléfono</span>
-                        )}
                       </td>
 
                       {/* Billetera / Saldo a Favor (Escenario 1) */}
@@ -1424,8 +1434,24 @@ export default function CustomersManagementPage() {
             <form onSubmit={handleSaveContact} className="flex-1 flex flex-col overflow-hidden">
               <div className="p-6 space-y-4 flex-1 overflow-y-auto text-xs">
               <div>
+                <label className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 mb-1">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                  <span>WhatsApp / Celular (Clave Principal) *</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editForm.whatsapp}
+                  onChange={(e) => setEditForm({ ...editForm, whatsapp: e.target.value })}
+                  placeholder="Ej: 573042141522"
+                  className="w-full px-3 py-2 bg-gray-900 border border-emerald-900/60 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono font-bold"
+                />
+                <p className="text-[10px] text-gray-500 mt-0.5">Identificador único principal del cliente en toda la plataforma.</p>
+              </div>
+
+              <div>
                 <label className="block text-xs font-medium text-gray-300 mb-1">
-                  Nombre Completo
+                  Nombre Completo *
                 </label>
                 <input
                   type="text"
@@ -1438,27 +1464,13 @@ export default function CustomersManagementPage() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-300 mb-1">
-                  Correo Electrónico
+                  Correo Electrónico (Opcional)
                 </label>
                 <input
                   type="email"
-                  required
                   value={editForm.email}
                   onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-xs text-white focus:outline-none focus:border-red-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1">
-                  WhatsApp / Celular
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editForm.whatsapp}
-                  onChange={(e) => setEditForm({ ...editForm, whatsapp: e.target.value })}
-                  placeholder="Ej: 3042141522 o +573042141522"
+                  placeholder="ejemplo@correo.com (opcional)"
                   className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-xs text-white focus:outline-none focus:border-red-600"
                 />
               </div>

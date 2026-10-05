@@ -200,51 +200,71 @@ export class OrdersService {
       });
       if (!customer) throw new NotFoundException('El cliente seleccionado no existe');
     } else {
-      if (!dto.clienteEmail || !dto.clienteNombre) {
-        throw new BadRequestException(
-          'Debes seleccionar un cliente existente o indicar Nombre y Correo para registrar uno nuevo.',
-        );
+      // 1. CLAVE PRINCIPAL: Buscar primero por WhatsApp/teléfono para evitar duplicidad
+      const cleanPhone = (dto.clienteWhatsapp || '').replace(/\D/g, '');
+      if (cleanPhone.length >= 7) {
+        customer = await this.prisma.customer.findFirst({
+          where: {
+            OR: [
+              { whatsapp: cleanPhone },
+              { whatsapp: `+${cleanPhone}` },
+              { user: { phone: cleanPhone } },
+              { user: { phone: `+${cleanPhone}` } },
+            ],
+          },
+          include: { user: true },
+        });
       }
-      const email = dto.clienteEmail.toLowerCase().trim();
-      let user = await this.prisma.user.findUnique({
-        where: { email },
-        include: { customer: true },
-      });
 
-      if (!user) {
-        const tempPass = await bcrypt.hash('cliente123', 10);
-        user = await this.prisma.user.create({
-          data: {
-            nombre: dto.clienteNombre.trim(),
-            email,
-            passwordHash: tempPass,
-            phone: dto.clienteWhatsapp?.trim() || null,
-            rol: UserRole.CLIENTE,
-            activo: true,
-            customer: {
-              create: {
-                whatsapp: dto.clienteWhatsapp?.trim() || '+573000000000',
-                pais: 'Colombia',
+      if (!customer) {
+        if (!dto.clienteNombre || !cleanPhone) {
+          throw new BadRequestException(
+            'Debes indicar al menos el Nombre y el WhatsApp/Teléfono (Clave Principal) para registrar un nuevo cliente.',
+          );
+        }
+        const email = dto.clienteEmail?.toLowerCase().trim() || null;
+        let user = email
+          ? await this.prisma.user.findUnique({
+              where: { email },
+              include: { customer: true },
+            })
+          : null;
+
+        if (!user) {
+          const tempPass = await bcrypt.hash('cliente123', 10);
+          user = await this.prisma.user.create({
+            data: {
+              nombre: dto.clienteNombre.trim(),
+              email,
+              passwordHash: tempPass,
+              phone: cleanPhone,
+              rol: UserRole.CLIENTE,
+              activo: true,
+              customer: {
+                create: {
+                  whatsapp: cleanPhone,
+                  pais: 'Colombia',
+                },
               },
             },
-          },
-          include: { customer: true },
-        });
-      } else if (!user.customer) {
-        await this.prisma.customer.create({
-          data: {
-            userId: user.id,
-            whatsapp: dto.clienteWhatsapp?.trim() || user.phone || '+573000000000',
-            pais: 'Colombia',
-          },
-        });
-        user = await this.prisma.user.findUnique({
-          where: { id: user.id },
-          include: { customer: true },
-        });
+            include: { customer: true },
+          });
+        } else if (!user.customer) {
+          await this.prisma.customer.create({
+            data: {
+              userId: user.id,
+              whatsapp: cleanPhone,
+              pais: 'Colombia',
+            },
+          });
+          user = await this.prisma.user.findUnique({
+            where: { id: user.id },
+            include: { customer: true },
+          });
+        }
+        customer = user.customer;
+        customer.user = user;
       }
-      customer = user.customer;
-      customer.user = user;
     }
 
     // 3. Obtener plan y validar stock

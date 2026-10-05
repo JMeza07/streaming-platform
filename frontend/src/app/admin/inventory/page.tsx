@@ -35,9 +35,11 @@ import {
 } from 'lucide-react';
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import { useDialog } from '@/components/Dialog';
+import { useSettings } from '@/context/SettingsContext';
 
 export default function InventoryPage() {
   const { alert, confirm } = useDialog();
+  const { systemName } = useSettings();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
@@ -521,7 +523,7 @@ export default function InventoryPage() {
 
     triggerPrintReport({
       title: 'Reporte de Inventario de Cuentas y Stock',
-      subtitle: `STREAMCONTROL - Filtro de estado: ${statusFilter || 'Todos'} | Total cuentas: ${filteredAccounts.length}`,
+      subtitle: `${systemName || 'MezaStreaming'} - Filtro de estado: ${statusFilter || 'Todos'} | Total cuentas: ${filteredAccounts.length}`,
       summaryCards: [
         { label: 'Total Cuentas', value: filteredAccounts.length },
         { label: 'Disponibles', value: countsByStatus['DISPONIBLE'] || 0 },

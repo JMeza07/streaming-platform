@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title StreamControl Platform - Deteniendo Servidores...
+title MezaStreaming Platform - Deteniendo Servidores...
 
 echo ======================================================================
 echo           🛑 STREAMING PLATFORM - DETENER SERVIDORES 🛑

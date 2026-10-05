@@ -19,8 +19,8 @@ enum UserRole {
 model User {
   id                String    @id @default(uuid())
   nombre            String
-  email             String    @unique
-  passwordHash      String    @map("password_hash")
+  email             String?   @unique
+  passwordHash      String?   @map("password_hash")
   phone             String?
   rol               UserRole  @default(CLIENTE)
   activo            Boolean   @default(true)
@@ -179,7 +179,7 @@ model Account {
 model Customer {
   id                  String              @id @default(uuid())
   userId              String              @unique @map("user_id")
-  whatsapp            String
+  whatsapp            String              @unique
   pais                String?
   optOutWhatsapp      Boolean             @default(false) @map("opt_out_whatsapp")
   walletBalance       Decimal             @default(0) @map("wallet_balance")
@@ -194,6 +194,7 @@ model Customer {
   supportTickets      SupportTicket[]
   infractions         ProfileInfraction[]
   
+  @@index([whatsapp])
   @@map("customers")
 }
 
@@ -441,6 +442,7 @@ model WhatsappConfig {
   plantillaRecordatorio7d String?  @map("plantilla_recordatorio_7d")
   plantillaRecordatorio1d String?  @map("plantilla_recordatorio_1d")
   plantillaRecuperacion3d String?  @map("plantilla_recuperacion_3d")
+  chatbotConfig           Json?    @default("{}") @map("chatbot_config")
   updatedAt               DateTime @updatedAt @map("updated_at")
   
   @@map("whatsapp_config")
@@ -451,7 +453,7 @@ model SystemSetting {
   id                   String   @id @default("singleton")
   mantenimiento        Boolean  @default(false)
   mensajeMantenimiento String   @default("Estamos realizando mantenimiento programado en la plataforma. Pronto estaremos de vuelta.") @map("mensaje_mantenimiento")
-  nombrePlataforma     String   @default("StreamControl") @map("nombre_plataforma")
+  nombrePlataforma     String   @default("MezaStreaming") @map("nombre_plataforma")
   logoUrl              String?  @map("logo_url")
   whatsappSoporte      String   @default("+573001234567") @map("whatsapp_soporte")
   moneda               String   @default("COP")

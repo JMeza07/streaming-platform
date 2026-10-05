@@ -24,9 +24,11 @@ import {
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import TablePagination from '@/components/TablePagination';
 import { useDialog } from '@/components/Dialog';
+import { useSettings } from '@/context/SettingsContext';
 
 export default function CatalogPage() {
   const { alert } = useDialog();
+  const { systemName } = useSettings();
   const [services, setServices] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -323,7 +325,7 @@ export default function CatalogPage() {
   const handlePrintCatalog = () => {
     triggerPrintReport({
       title: 'Catálogo Oficial de Streaming y Planes',
-      subtitle: `STREAMCONTROL - Listado de tarifas, condiciones y disponibilidad en tiempo real`,
+      subtitle: `${systemName || 'MezaStreaming'} - Listado de tarifas, condiciones y disponibilidad en tiempo real`,
       summaryCards: [
         { label: 'Total Plataformas', value: services.length },
         { label: 'Total Planes', value: plans.length },

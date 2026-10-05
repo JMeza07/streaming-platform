@@ -8,6 +8,7 @@ import {
   HttpCode,
 } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
+import { ChatbotService } from './chatbot.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ConfigWhatsappDto } from './dto/config-whatsapp.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,22 +18,36 @@ import { UserRole } from '@prisma/client';
 
 @Controller('whatsapp')
 export class WhatsappController {
-  constructor(private readonly whatsappService: WhatsappService) {}
+  constructor(
+    private readonly whatsappService: WhatsappService,
+    private readonly chatbotService: ChatbotService,
+  ) {}
 
   // ============================================
   // ENDPOINTS PÚBLICOS (Webhooks)
   // ============================================
 
-  // WEBHOOK PARA RECIBIR MENSAJES ENTRANTES
+  // WEBHOOK PARA RECIBIR MENSAJES ENTRANTES DE EVOLUTION API
   @Post('webhook')
   @HttpCode(200)
   async handleWebhook(@Body() body: any) {
-    // Aquí procesarías los mensajes que envían los clientes
-    // Por ejemplo: "YA PAGUÉ", "NO FUNCIONA", etc.
-    console.log('Webhook recibido:', body);
-    
-    // TODO: Implementar lógica de chatbot
+    // Procesar mensaje en segundo plano para responder de inmediato 200 a Evolution API
+    this.chatbotService.processIncomingMessage(body).catch((err) => {
+      console.error('Error en procesamiento de Chatbot:', err);
+    });
+
     return { success: true };
+  }
+
+  // COMPROBACIÓN DE SALUD DEL WEBHOOK (GET desde navegador)
+  @Get('webhook')
+  getWebhookHealth() {
+    return {
+      status: 'active',
+      message: 'El Webhook de WhatsApp está activo y listo para recibir peticiones POST desde Evolution API.',
+      endpoint: '/api/whatsapp/webhook',
+      timestamp: new Date().toISOString(),
+    };
   }
 
   // ============================================
@@ -108,8 +123,54 @@ export class WhatsappController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   async testReminders() {
-    // Este método es privado en el service, lo exponemos solo para pruebas
-    // En producción deberías eliminarlo o protegerlo mejor
     return { message: 'Usa el endpoint de configuración para activar notificaciones' };
+  }
+
+  // ESTADO DEL MOTOR DE IA LOCAL (OLLAMA)
+  @Get('chatbot/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SOPORTE)
+  async getChatbotStatus() {
+    return this.chatbotService.checkOllamaStatus();
+  }
+
+  // OBTENER CONFIGURACIÓN DEL CHATBOT IA Y REGLAS
+  @Get('chatbot/config')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async getChatbotConfig() {
+    return this.whatsappService.getChatbotConfig();
+  }
+
+  // ACTUALIZAR CONFIGURACIÓN DEL CHATBOT IA Y REGLAS
+  @Patch('chatbot/config')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async updateChatbotConfig(@Body() body: any) {
+    return this.whatsappService.updateChatbotConfig(body);
+  }
+
+  // SIMULADOR / SANDBOX DE PRUEBA EN VIVO DE LA IA
+  @Post('chatbot/simulate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async simulateAiChat(@Body() body: { mensaje: string; config?: any }) {
+    return this.chatbotService.simulateAiChat(body.mensaje, body.config);
+  }
+
+  // DESCARGAR UN MODELO EN OLLAMA DIRECTAMENTE DESDE LA INTERFAZ
+  @Post('chatbot/pull-model')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async pullOllamaModel(@Body('model') model: string) {
+    return this.chatbotService.pullModel(model);
+  }
+
+  // CONFIGURAR WEBHOOK EN EVOLUTION API
+  @Post('webhook/configure')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async configureWebhook(@Body('url') url?: string) {
+    return this.whatsappService.configureWebhook(url);
   }
 }

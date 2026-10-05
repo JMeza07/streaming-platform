@@ -77,7 +77,7 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState({
     mantenimiento: false,
     mensajeMantenimiento: '',
-    nombrePlataforma: 'STREAMCONTROL',
+    nombrePlataforma: 'MezaStreaming',
     logoUrl: '',
     whatsappSoporte: '+57 300 123 4567',
     moneda: 'COP',
@@ -95,7 +95,7 @@ export default function SettingsPage() {
         setFormData({
           mantenimiento: Boolean(res.data.mantenimiento),
           mensajeMantenimiento: res.data.mensajeMantenimiento || 'Estamos realizando mejoras programadas en el servidor.',
-          nombrePlataforma: res.data.nombrePlataforma || 'STREAMCONTROL',
+          nombrePlataforma: res.data.nombrePlataforma || 'MezaStreaming',
           logoUrl: res.data.logoUrl || '',
           whatsappSoporte: res.data.whatsappSoporte || '+57 300 123 4567',
           moneda: res.data.moneda || 'COP',
@@ -267,7 +267,8 @@ export default function SettingsPage() {
 
       const link = document.createElement('a');
       link.href = url;
-      link.download = `backup_streamcontrol_${new Date().toISOString().slice(0, 10)}.json`;
+      const platformSlug = (formData.nombrePlataforma || 'MezaStreaming').toLowerCase().replace(/\s+/g, '_');
+      link.download = `backup_${platformSlug}_${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -475,7 +476,7 @@ export default function SettingsPage() {
                     <Tv className="w-3.5 h-3.5 text-white" />
                   )}
                 </div>
-                <BrandTwoToneText name={formData.nombrePlataforma || 'STREAMCONTROL'} className="text-xs font-black tracking-tight" />
+                <BrandTwoToneText name={formData.nombrePlataforma || 'MezaStreaming'} className="text-xs font-black tracking-tight" />
               </div>
             </div>
           </div>
@@ -501,7 +502,7 @@ export default function SettingsPage() {
                     onChange={(e) =>
                       setFormData({ ...formData, nombrePlataforma: e.target.value })
                     }
-                    placeholder="Ej. MEZA STEAM o STREAMCONTROL"
+                    placeholder="Ej. MezaStreaming"
                     className="w-full px-3.5 py-2.5 bg-gray-950/80 border border-gray-800 focus:border-red-600 rounded-xl text-white font-semibold text-sm focus:outline-none transition-all placeholder:text-gray-600"
                   />
                   <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
@@ -1022,7 +1023,7 @@ export default function SettingsPage() {
                     <input
                       type="text"
                       required
-                      placeholder="Ej. StreamControl SAS o Juan Pérez"
+                      placeholder="Ej. MezaStreaming SAS o Juan Pérez"
                       value={paymentForm.titular}
                       onChange={(e) => setPaymentForm({ ...paymentForm, titular: e.target.value })}
                       className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-white focus:outline-none focus:border-purple-600"

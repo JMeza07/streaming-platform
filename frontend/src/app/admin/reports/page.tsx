@@ -25,9 +25,11 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import { useDialog } from '@/components/Dialog';
+import { useSettings } from '@/context/SettingsContext';
 
 export default function ReportsPage() {
   const { alert, confirm } = useDialog();
+  const { systemName } = useSettings();
   const [activeTab, setActiveTab] = useState<'financial' | 'customers'>('financial');
 
   // Datos financieros
@@ -228,7 +230,7 @@ export default function ReportsPage() {
 
     triggerPrintReport({
       title: `Informe Financiero de Ingresos (${periodLabel})`,
-      subtitle: `STREAMCONTROL - Resumen de facturación histórica y flujo de caja`,
+      subtitle: `${systemName || 'MezaStreaming'} - Resumen de facturación histórica y flujo de caja`,
       summaryCards: [
         {
           label: 'Total Recaudado Global',
