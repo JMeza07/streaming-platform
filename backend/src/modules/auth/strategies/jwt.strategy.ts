@@ -48,7 +48,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       rol: user?.rol || payload.rol,
       nombre: user?.nombre,
       modulosPermitidos: finalModules,
-      customerId: customer?.id || null,
+      // REGLA ESTRICTA: El administrador ni ningún usuario del sistema puede ser ni operar como cliente
+      customerId: user?.rol === UserRole.CLIENTE ? (customer?.id || null) : null,
       affiliateId: affiliate?.id || null,
     };
   }

@@ -26,12 +26,14 @@ export class OrdersService {
 
   // CREAR ORDEN (Checkout)
   async createOrder(dto: CreateOrderDto) {
-    // 1. Validar que el cliente existe
+    // 1. Validar que el cliente existe y es un cliente legítimo (no usuario interno/administrador)
     const customer = await this.prisma.customer.findUnique({
       where: { id: dto.customerId },
       include: { user: true },
     });
-    if (!customer) throw new NotFoundException('Cliente no encontrado');
+    if (!customer || customer.user?.rol !== UserRole.CLIENTE) {
+      throw new BadRequestException('El cliente seleccionado no es válido o corresponde a un usuario del sistema.');
+    }
 
     // 2. Calcular totales y validar planes existen
     let total = 0;
@@ -198,13 +200,45 @@ export class OrdersService {
         where: { id: dto.customerId },
         include: { user: true },
       });
-      if (!customer) throw new NotFoundException('El cliente seleccionado no existe');
+      if (!customer || customer.user?.rol !== UserRole.CLIENTE) {
+        throw new BadRequestException('El cliente seleccionado no es válido o corresponde a un usuario del sistema.');
+      }
     } else {
       // 1. CLAVE PRINCIPAL: Buscar primero por WhatsApp/teléfono para evitar duplicidad
       const cleanPhone = (dto.clienteWhatsapp || '').replace(/\D/g, '');
-      if (cleanPhone.length >= 7) {
+      const email = dto.clienteEmail?.toLowerCase().trim() || null;
+
+      // REGLA ESTRICTA: El administrador ni ningún usuario del sistema puede ser ni aparecer como cliente
+      if (email) {
+        const staffByEmail = await this.prisma.user.findFirst({
+          where: {
+            email,
+            rol: { not: UserRole.CLIENTE },
+          },
+        });
+        if (staffByEmail) {
+          throw new BadRequestException(
+            `El correo "${email}" pertenece al usuario del sistema "${staffByEmail.nombre}" (${staffByEmail.rol}). Ningún usuario del sistema puede ser cliente.`,
+          );
+        }
+      }
+
+      if (cleanPhone && cleanPhone.length >= 7) {
+        const staffByPhone = await this.prisma.user.findFirst({
+          where: {
+            phone: { in: [cleanPhone, `+${cleanPhone}`] },
+            rol: { not: UserRole.CLIENTE },
+          },
+        });
+        if (staffByPhone) {
+          throw new BadRequestException(
+            `El teléfono "${cleanPhone}" pertenece al usuario del sistema "${staffByPhone.nombre}" (${staffByPhone.rol}). Ningún usuario del sistema puede ser cliente.`,
+          );
+        }
+
         customer = await this.prisma.customer.findFirst({
           where: {
+            user: { rol: UserRole.CLIENTE },
             OR: [
               { whatsapp: cleanPhone },
               { whatsapp: `+${cleanPhone}` },
@@ -222,13 +256,18 @@ export class OrdersService {
             'Debes indicar al menos el Nombre y el WhatsApp/Teléfono (Clave Principal) para registrar un nuevo cliente.',
           );
         }
-        const email = dto.clienteEmail?.toLowerCase().trim() || null;
         let user = email
           ? await this.prisma.user.findUnique({
               where: { email },
               include: { customer: true },
             })
           : null;
+
+        if (user && user.rol !== UserRole.CLIENTE) {
+          throw new BadRequestException(
+            `El usuario "${user.nombre}" (${user.email}) tiene rol ${user.rol} y no puede operar como cliente.`,
+          );
+        }
 
         if (!user) {
           const tempPass = await bcrypt.hash('cliente123', 10);

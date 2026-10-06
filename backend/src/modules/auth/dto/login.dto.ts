@@ -1,9 +1,15 @@
-import { IsEmail, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class LoginDto {
-  @IsEmail()
+  @IsNotEmpty({ message: 'El correo, WhatsApp o teléfono es obligatorio' })
+  @IsString()
   email: string;
 
+  @IsNotEmpty({ message: 'La contraseña es obligatoria' })
   @IsString()
   password: string;
+
+  @IsOptional()
+  @IsString()
+  twoFactorCode?: string;
 }

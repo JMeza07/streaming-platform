@@ -942,6 +942,7 @@ export class ChatbotService {
     if (cleanPhone && cleanPhone.length >= 7) {
       const customerByPhone = await this.prisma.customer.findFirst({
         where: {
+          user: { rol: UserRole.CLIENTE },
           OR: [
             { whatsapp: cleanPhone },
             { whatsapp: `+${cleanPhone}` },
@@ -965,6 +966,11 @@ export class ChatbotService {
       });
 
       if (existingUser) {
+        if (existingUser.rol !== UserRole.CLIENTE) {
+          this.logger.warn(`El usuario ${existingUser.email} es un usuario del sistema (${existingUser.rol}) y no puede operar como cliente.`);
+          return null;
+        }
+
         if (existingUser.customer) {
           return {
             ...existingUser.customer,
@@ -2154,6 +2160,7 @@ export class ChatbotService {
 
       const customer = await this.prisma.customer.findFirst({
         where: {
+          user: { rol: UserRole.CLIENTE },
           OR: [
             { whatsapp: cleanPhone },
             { whatsapp: `+${cleanPhone}` },
@@ -2187,6 +2194,7 @@ export class ChatbotService {
       const customerByName = await this.prisma.customer.findFirst({
         where: {
           user: {
+            rol: UserRole.CLIENTE,
             nombre: { equals: pushName.trim(), mode: 'insensitive' },
           },
         },

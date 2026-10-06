@@ -65,9 +65,10 @@ export class DashboardService {
       },
     });
 
-    // Clientes totales
+    // Clientes totales (excluye estrictamente administradores y personal interno)
     const clientesTotales = await this.prisma.customer.count({
       where: {
+        user: { rol: UserRole.CLIENTE },
         ...(!isAdmin && currentUserId ? { orders: { some: { vendedorId: currentUserId } } } : {}),
       },
     });

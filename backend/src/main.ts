@@ -17,9 +17,9 @@ async function bootstrap() {
   app.use(json({ limit: '15mb' }));
   app.use(urlencoded({ extended: true, limit: '15mb' }));
 
-  // Habilitar CORS para el frontend
+  // Habilitar CORS para frontend y PWA (LAN e Internet)
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: true,
     credentials: true,
   });
   

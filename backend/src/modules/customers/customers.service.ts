@@ -27,6 +27,9 @@ export class CustomersService {
   }, currentUser?: any) {
     const where: any = {};
 
+    // Regla estricta: NINGÚN usuario interno o administrador puede aparecer como cliente
+    where.user = { rol: UserRole.CLIENTE };
+
     const currentUserId = currentUser?.userId || currentUser?.id;
     const isVendedor = currentUser?.rol === UserRole.VENDEDOR;
     const isAsesor = currentUser?.rol === UserRole.ASESOR_COMERCIAL;
@@ -63,6 +66,7 @@ export class CustomersService {
             nombre: true,
             email: true,
             phone: true,
+            rol: true,
             activo: true,
             createdAt: true,
           },
@@ -259,6 +263,7 @@ export class CustomersService {
             nombre: true,
             email: true,
             phone: true,
+            rol: true,
             activo: true,
             createdAt: true,
           },
@@ -310,7 +315,7 @@ export class CustomersService {
       },
     });
 
-    if (!customer) {
+    if (!customer || customer.user?.rol !== UserRole.CLIENTE) {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
     }
 
@@ -352,7 +357,7 @@ export class CustomersService {
       include: { user: true },
     });
 
-    if (!customer) {
+    if (!customer || customer.user?.rol !== UserRole.CLIENTE) {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
     }
 
@@ -444,7 +449,7 @@ export class CustomersService {
       include: { user: true },
     });
 
-    if (!customer) {
+    if (!customer || customer.user?.rol !== UserRole.CLIENTE) {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
     }
 
@@ -493,7 +498,7 @@ export class CustomersService {
       },
     });
 
-    if (!customer) {
+    if (!customer || customer.user?.rol !== UserRole.CLIENTE) {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
     }
 

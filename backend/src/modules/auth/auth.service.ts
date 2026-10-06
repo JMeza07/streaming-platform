@@ -31,26 +31,67 @@ export class AuthService {
 
   // REGISTRO DE CLIENTE
   async register(dto: RegisterDto, ip?: string, userAgent?: string) {
-    // 1. Verificar si el email ya existe
-    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existingUser) throw new ConflictException('Este correo ya está registrado');
+    const rawWhatsapp = dto.whatsapp.trim();
+    const cleanDigits = rawWhatsapp.replace(/[\s\-\+\(\)]/g, '');
+
+    // 1. Verificar si el WhatsApp ya existe en clientes o usuarios
+    const existingCustomer = await this.prisma.customer.findFirst({
+      where: {
+        OR: [
+          { whatsapp: rawWhatsapp },
+          { whatsapp: cleanDigits },
+          ...(cleanDigits.length >= 8 ? [{ whatsapp: { contains: cleanDigits.slice(-10) } }] : []),
+        ],
+      },
+    });
+
+    if (existingCustomer) {
+      throw new ConflictException('Ya existe un cliente registrado con este número de WhatsApp');
+    }
+
+    // 1.1 Verificar si el teléfono o correo ya pertenece a un usuario del sistema
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: rawWhatsapp },
+          { phone: cleanDigits },
+          ...(cleanDigits.length >= 8 ? [{ phone: { contains: cleanDigits.slice(-10) } }] : []),
+          ...(dto.email && dto.email.trim().length > 0
+            ? [{ email: { equals: dto.email.trim(), mode: 'insensitive' as const } }]
+            : []),
+        ],
+      },
+    });
+
+    if (existingUser) {
+      if (existingUser.rol !== UserRole.CLIENTE) {
+        throw new ConflictException(
+          'Este contacto pertenece a un usuario del sistema y no puede ser registrado como cliente.',
+        );
+      }
+      throw new ConflictException('Este usuario o número de teléfono ya se encuentra registrado.');
+    }
 
     // 2. Encriptar contraseña
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     // 3. Crear Usuario y su perfil de Cliente en una sola transacción
+    const emailToSave = (dto.email && dto.email.trim().length > 0)
+      ? dto.email.trim().toLowerCase()
+      : null;
+
     const user = await this.prisma.user.create({
       data: {
-        nombre: dto.nombre,
-        email: dto.email,
+        nombre: dto.nombre.trim(),
+        email: emailToSave,
         passwordHash: hashedPassword,
-        phone: dto.whatsapp,
+        phone: rawWhatsapp,
         rol: UserRole.CLIENTE,
         twoFactorEnabled: false,
         customer: {
           create: {
-            whatsapp: dto.whatsapp,
-            pais: dto.pais,
+            whatsapp: rawWhatsapp,
+            pais: dto.pais || 'CO',
           },
         },
       },
@@ -61,7 +102,7 @@ export class AuthService {
       accion: 'REGISTRO_CLIENTE',
       modulo: AuditCategory.CLIENTES,
       severidad: AuditSeverity.INFO,
-      descripcion: `Nuevo cliente registrado en la tienda web: ${user.nombre} (${user.email})`,
+      descripcion: `Nuevo cliente registrado: ${user.nombre} (WhatsApp: ${rawWhatsapp})`,
       entidadTipo: 'User',
       entidadId: user.id,
       usuarioId: user.id,
@@ -72,15 +113,28 @@ export class AuthService {
       userAgent,
     });
 
-    // 4. Generar Token JWT (Para clientes el 2FA es opcional; pueden activarlo en su portal)
+    // 4. Generar Token JWT
     return this.generateToken(user);
   }
 
-  // LOGIN CON REGLAS DE 2FA (Obligatorio para personal interno, Opcional para clientes)
+  // LOGIN CON REGLAS DE 2FA (Soporta Email, WhatsApp o Teléfono)
   async login(dto: LoginDto, ip?: string, userAgent?: string) {
-    // 1. Buscar usuario por email
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.trim().toLowerCase() },
+    const rawInput = dto.email ? dto.email.trim() : '';
+    const cleanDigits = rawInput.replace(/[\s\-\+\(\)]/g, '');
+
+    // 1. Buscar usuario por email, phone directo en User, o whatsapp en Customer
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: { equals: rawInput, mode: 'insensitive' } },
+          { phone: rawInput },
+          { phone: cleanDigits },
+          ...(cleanDigits.length >= 8 ? [{ phone: { contains: cleanDigits.slice(-10) } }] : []),
+          { customer: { whatsapp: rawInput } },
+          { customer: { whatsapp: cleanDigits } },
+          ...(cleanDigits.length >= 8 ? [{ customer: { whatsapp: { contains: cleanDigits.slice(-10) } } }] : []),
+        ],
+      },
       include: { customer: true, affiliate: true },
     });
 
@@ -89,24 +143,24 @@ export class AuthService {
         accion: 'FALLO_INICIO_SESION',
         modulo: AuditCategory.AUTH,
         severidad: AuditSeverity.WARNING,
-        descripcion: `Intento de acceso fallido para correo inexistente o inactivo: ${dto.email}`,
+        descripcion: `Intento de acceso fallido para: ${rawInput}`,
         exito: false,
         errorMensaje: 'Usuario no encontrado o suspendido',
         ip,
         userAgent,
-        detalles: { email: dto.email },
+        detalles: { input: rawInput },
       });
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
     // 2. Validar contraseña
-    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash || '');
     if (!isPasswordValid) {
       await this.auditService.registrarEvento({
         accion: 'FALLO_INICIO_SESION',
         modulo: AuditCategory.AUTH,
         severidad: AuditSeverity.WARNING,
-        descripcion: `Contraseña incorrecta ingresada para usuario: ${user.email} (${user.rol})`,
+        descripcion: `Contraseña incorrecta ingresada para usuario: ${user.email || user.phone} (${user.rol})`,
         exito: false,
         errorMensaje: 'Contraseña no válida',
         usuarioId: user.id,
@@ -119,11 +173,17 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    const isMandatory = this.twoFactorService.is2FAMandatory(user.rol);
-
-    // CASO A: El usuario ya tiene 2FA configurado y activado (sea administrativo o cliente voluntario)
+    // 3. Manejo de 2FA
     if (user.twoFactorEnabled && user.twoFactorSecret) {
-      const tempToken = this.twoFactorService.generateTempToken(user);
+      if (dto.twoFactorCode && this.twoFactorService.verifyCode(dto.twoFactorCode, user.twoFactorSecret)) {
+        return this.generateToken(user);
+      }
+
+      const tempToken = this.twoFactorService.generateTempToken({
+        id: user.id,
+        email: user.email || user.phone || 'usuario@stream.com',
+        rol: user.rol,
+      });
       return {
         requires2FA: true,
         tempToken,
@@ -136,28 +196,7 @@ export class AuthService {
       };
     }
 
-    // CASO B: El usuario es personal del sistema (ADMIN, VENDEDOR, SOPORTE, ASESOR) y NO ha configurado 2FA
-    // ¡Es OBLIGATORIO! Lo forzamos a vincular Google Authenticator antes de otorgarle acceso
-    if (isMandatory && !user.twoFactorEnabled) {
-      const { secret, qrCode, otpauthUrl } = await this.twoFactorService.generateSecret(user.email);
-      const tempToken = this.twoFactorService.generateTempToken(user);
-
-      return {
-        requires2FASetup: true,
-        tempToken,
-        secret,
-        qrCode,
-        otpauthUrl,
-        user: {
-          id: user.id,
-          nombre: user.nombre,
-          email: user.email,
-          rol: user.rol,
-        },
-      };
-    }
-
-    // CASO C: Es un cliente normal (CLIENTE) sin 2FA activado (Opcional)
+    // Login exitoso directo
     await this.auditService.registrarEvento({
       accion: 'INICIO_SESION',
       modulo: AuditCategory.AUTH,
@@ -388,16 +427,23 @@ export class AuthService {
   private generateToken(user: any) {
     const payload = {
       sub: user.id,
-      email: user.email,
+      email: user.email || user.phone || 'usuario@stream.com',
       rol: user.rol,
+      customerId: user.customer?.id || null,
     };
 
+    const token = this.jwtService.sign(payload);
+
     return {
-      access_token: this.jwtService.sign(payload),
+      access_token: token,
+      accessToken: token, // Compatible con ambos estándares de frontend y PWA
+      token: token,
       user: {
         id: user.id,
         nombre: user.nombre,
         email: user.email,
+        phone: user.phone,
+        whatsapp: user.customer?.whatsapp || user.phone,
         rol: user.rol,
         twoFactorEnabled: user.twoFactorEnabled ?? false,
         modulosPermitidos:
@@ -405,6 +451,8 @@ export class AuthService {
             ? (user.rol === UserRole.ASESOR_COMERCIAL ? ['/admin/seller', '/admin/customers', '/admin/orders'] : ALL_SYSTEM_MODULES)
             : (user.modulosPermitidos || []),
         customerId: user.customer?.id || null,
+        saldoBilletera: Number(user.customer?.walletBalance || 0),
+        strikes: user.customer?.strikes || 0,
       },
     };
   }

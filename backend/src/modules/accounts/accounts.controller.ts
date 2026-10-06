@@ -16,7 +16,7 @@ export class AccountsController {
   // RESUMEN Y REPORTES DE INVENTARIO
   // =========================================================================
   @Get('summary')
-  @Roles(UserRole.ADMIN, UserRole.SOPORTE)
+  @Roles(UserRole.ADMIN, UserRole.VENDEDOR, UserRole.SOPORTE)
   getSummary() {
     return this.accountsService.getInventorySummary();
   }

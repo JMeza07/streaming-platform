@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, UserRole } from '@prisma/client';
 
 @Injectable()
 export class ReportsService {
@@ -115,6 +115,9 @@ export class ReportsService {
     search?: string;
   }) {
     const customers = await this.prisma.customer.findMany({
+      where: {
+        user: { rol: UserRole.CLIENTE },
+      },
       include: {
         user: {
           select: { id: true, nombre: true, email: true, phone: true, activo: true, createdAt: true },
