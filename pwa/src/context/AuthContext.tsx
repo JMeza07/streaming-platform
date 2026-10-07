@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import {
   getToken,
   setToken,
+  setRefreshToken,
   getStoredUser,
   setStoredUser,
   getApiUrl,
@@ -132,8 +133,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     const token = res?.access_token || res?.accessToken || res?.token;
+    const refreshToken = res?.refreshToken || res?.refresh_token;
     if (res && token) {
       setToken(token);
+      if (refreshToken) setRefreshToken(refreshToken);
       setAuthToken(token);
 
       const loggedUser: UserProfile = res.user;
@@ -149,8 +152,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const register = async (data: { nombre: string; whatsapp: string; email?: string; password: string }) => {
     const res = await api.auth.register(data);
     const token = res?.access_token || res?.accessToken || res?.token;
+    const refreshToken = res?.refreshToken || res?.refresh_token;
     if (res && token) {
       setToken(token);
+      if (refreshToken) setRefreshToken(refreshToken);
       setAuthToken(token);
       const registeredUser: UserProfile = res.user;
       setUser(registeredUser);
@@ -162,6 +167,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = () => {
     setToken(null);
+    setRefreshToken(null);
     setAuthToken(null);
     setStoredUser(null);
     setUser(null);

@@ -63,12 +63,20 @@ export default function LoginPage() {
       .catch(() => {});
   }, []);
 
-  const completeLoginSession = (access_token: string, user: any) => {
+  const completeLoginSession = (access_token: string, user: any, refresh_token?: string) => {
     setFailedAttempts(0);
-    Cookies.set('token', access_token, { expires: 7 });
-    Cookies.set('user', JSON.stringify(user), { expires: 7 });
+    // Access Token 8h (1/3 día) - SRS RNF-S06
+    Cookies.set('token', access_token, { expires: 1 / 3 });
+    if (refresh_token) {
+      // Refresh Token 30 días - SRS RNF-S06
+      Cookies.set('refreshToken', refresh_token, { expires: 30 });
+    }
+    Cookies.set('user', JSON.stringify(user), { expires: 30 });
     if (typeof window !== 'undefined') {
       localStorage.setItem('user', JSON.stringify(user));
+      if (refresh_token) {
+        localStorage.setItem('refreshToken', refresh_token);
+      }
     }
 
     const isStaff =
@@ -133,7 +141,7 @@ export default function LoginPage() {
       }
 
       // CASO 3: Login estándar (Cliente sin 2FA)
-      const { access_token, user } = response.data;
+      const { access_token, user, refreshToken, refresh_token } = response.data;
 
       // Verificar modo mantenimiento: solo ADMIN puede entrar
       try {
@@ -148,7 +156,7 @@ export default function LoginPage() {
         }
       } catch (_) {}
 
-      completeLoginSession(access_token, user);
+      completeLoginSession(access_token, user, refreshToken || refresh_token);
     } catch (err: any) {
       setFailedAttempts((prev) => {
         const next = prev + 1;
@@ -185,8 +193,8 @@ export default function LoginPage() {
         code: twoFactorCode.trim(),
       });
 
-      const { access_token, user } = response.data;
-      completeLoginSession(access_token, user);
+      const { access_token, user, refreshToken, refresh_token } = response.data;
+      completeLoginSession(access_token, user, refreshToken || refresh_token);
     } catch (err: any) {
       const msg = err.response?.data?.message || 'Código de Google Authenticator incorrecto o expirado.';
       setTwoFactorError(msg);
@@ -210,8 +218,8 @@ export default function LoginPage() {
         code: twoFactorCode.trim(),
       });
 
-      const { access_token, user } = response.data;
-      completeLoginSession(access_token, user);
+      const { access_token, user, refreshToken, refresh_token } = response.data;
+      completeLoginSession(access_token, user, refreshToken || refresh_token);
     } catch (err: any) {
       const msg = err.response?.data?.message || 'Código incorrecto. Verifica la hora de tu móvil e intenta de nuevo.';
       setTwoFactorError(msg);

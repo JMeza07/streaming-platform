@@ -8,6 +8,7 @@ import { OrderStatus, SubscriptionStatus, AccountStatus, AuditCategory, AuditSev
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import * as bcrypt from 'bcrypt';
 import { AuditService } from '../audit/audit.service';
+import { toTitleCase, normalizeE164 } from '../../common/utils/formatters.util';
 
 @Injectable()
 export class CustomersService {
@@ -25,10 +26,12 @@ export class CustomersService {
     endDate?: string;
     hasOrders?: string;
   }, currentUser?: any) {
-    const where: any = {};
+    const where: any = {
+      deletedAt: null,
+    };
 
     // Regla estricta: NINGÚN usuario interno o administrador puede aparecer como cliente
-    where.user = { rol: UserRole.CLIENTE };
+    where.user = { rol: UserRole.CLIENTE, deletedAt: null };
 
     const currentUserId = currentUser?.userId || currentUser?.id;
     const isVendedor = currentUser?.rol === UserRole.VENDEDOR;
@@ -254,8 +257,8 @@ export class CustomersService {
     const isVendedor = currentUser?.rol === UserRole.VENDEDOR;
     const isAsesor = currentUser?.rol === UserRole.ASESOR_COMERCIAL;
 
-    const customer = await this.prisma.customer.findUnique({
-      where: { id },
+    const customer = await this.prisma.customer.findFirst({
+      where: { id, deletedAt: null },
       include: {
         user: {
           select: {
@@ -380,22 +383,25 @@ export class CustomersService {
       }
 
       if (dto.nombre || dto.email || dto.phone !== undefined || dto.activo !== undefined || passwordHash) {
+        const formattedNombre = dto.nombre ? toTitleCase(dto.nombre) : undefined;
+        const formattedPhone = dto.phone ? normalizeE164(dto.phone) : undefined;
         await tx.user.update({
           where: { id: customer.userId },
           data: {
-            ...(dto.nombre && { nombre: dto.nombre }),
+            ...(formattedNombre && { nombre: formattedNombre }),
             ...(dto.email && { email: dto.email }),
-            ...(dto.phone !== undefined && { phone: dto.phone }),
+            ...(formattedPhone !== undefined && { phone: formattedPhone }),
             ...(dto.activo !== undefined && { activo: dto.activo }),
             ...(passwordHash && { passwordHash }),
           },
         });
       }
 
+      const formattedWhatsapp = dto.whatsapp ? normalizeE164(dto.whatsapp) : undefined;
       const updatedCustomer = await tx.customer.update({
         where: { id },
         data: {
-          ...(dto.whatsapp !== undefined && { whatsapp: dto.whatsapp }),
+          ...(formattedWhatsapp !== undefined && { whatsapp: formattedWhatsapp }),
           ...(dto.pais !== undefined && { pais: dto.pais }),
         },
         include: {
@@ -487,23 +493,33 @@ export class CustomersService {
     };
   }
 
-  // 5. ELIMINAR CLIENTE DE FORMA SEGURA (Con liberación de inventario y limpieza)
+  // 5. ELIMINAR CLIENTE DE FORMA SEGURA (BORRADO LÓGICO - SRS RESTRICCIÓN 2.3)
   async deleteCustomer(id: string, operatorId?: string) {
-    const customer = await this.prisma.customer.findUnique({
-      where: { id },
+    const customer = await this.prisma.customer.findFirst({
+      where: { id, deletedAt: null },
       include: {
         user: true,
-        subscriptions: true,
+        subscriptions: { where: { estado: SubscriptionStatus.ACTIVA } },
         orders: true,
       },
     });
 
     if (!customer || customer.user?.rol !== UserRole.CLIENTE) {
-      throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
+      throw new NotFoundException(`Cliente con ID ${id} no encontrado o ya dado de baja`);
     }
 
+    const previousData = {
+      id: customer.id,
+      nombre: customer.user.nombre,
+      email: customer.user.email,
+      whatsapp: customer.whatsapp,
+      activo: customer.user.activo,
+      estadoUsuario: customer.estadoUsuario,
+      suscripcionesActivas: customer.subscriptions.length,
+    };
+
     await this.prisma.$transaction(async (tx) => {
-      // 1. Liberar cuentas asignadas a las suscripciones del cliente (volver a DISPONIBLE)
+      // 1. Liberar perfiles asociados a suscripciones activas para reasignación en inventario
       for (const sub of customer.subscriptions) {
         if (sub.accountId) {
           await tx.account
@@ -515,69 +531,188 @@ export class CustomersService {
         }
       }
 
-      // 2. Eliminar logs de notificaciones
-      await tx.notificationLog.deleteMany({
-        where: { customerId: id },
-      });
-
-      // 3. Eliminar tickets de soporte
-      await tx.supportTicket.deleteMany({
-        where: { customerId: id },
-      });
-
-      // 4. Eliminar suscripciones
-      await tx.subscription.deleteMany({
-        where: { customerId: id },
-      });
-
-      // 5. Eliminar pedidos y sus comisiones / items asociados
-      const orderIds = customer.orders.map((o) => o.id);
-      if (orderIds.length > 0) {
-        await tx.commission.deleteMany({
-          where: { orderId: { in: orderIds } },
-        });
-
-        await tx.orderItem.deleteMany({
-          where: { orderId: { in: orderIds } },
-        });
-
-        await tx.order.deleteMany({
-          where: { id: { in: orderIds } },
+      // 2. Marcar suscripciones activas como CANCELADAS
+      if (customer.subscriptions.length > 0) {
+        await tx.subscription.updateMany({
+          where: { customerId: id, estado: SubscriptionStatus.ACTIVA },
+          data: { estado: SubscriptionStatus.CANCELADA },
         });
       }
 
-      // 6. Eliminar registro del Cliente
-      await tx.customer.delete({
+      // 3. Borrado lógico del registro Customer (SRS 2.3)
+      await tx.customer.update({
         where: { id },
+        data: {
+          deletedAt: new Date(),
+          estadoUsuario: 'ELIMINADO',
+        },
       });
 
-      // 7. Eliminar Usuario
-      await tx.user.delete({
+      // 4. Borrado lógico y suspensión del Usuario asociado (SRS 2.3)
+      await tx.user.update({
         where: { id: customer.userId },
+        data: {
+          activo: false,
+          deletedAt: new Date(),
+        },
+      });
+
+      // 5. Revocar sesiones activas del cliente
+      await tx.refreshToken.updateMany({
+        where: { userId: customer.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
       });
     });
 
-    // AUDITORÍA DEL SISTEMA
+    const nextData = {
+      id: customer.id,
+      activo: false,
+      deletedAt: new Date().toISOString(),
+      estadoUsuario: 'ELIMINADO',
+    };
+
+    // AUDITORÍA INMUTABLE CON DIFF ANTERIOR/NUEVO (SRS RF-037 / RNF-S08)
     await this.auditService.registrarEvento({
       usuarioId: operatorId,
       modulo: AuditCategory.CLIENTES,
-      accion: 'ELIMINACION_CLIENTE',
-      severidad: AuditSeverity.CRITICAL,
-      descripcion: `Cliente "${customer.user.nombre}" (${customer.user.email}) ELIMINADO permanentemente del sistema con todas sus órdenes y suscripciones liberadas.`,
+      accion: 'BAJA_LOGICA_CLIENTE',
+      severidad: AuditSeverity.WARNING,
+      descripcion: `Cliente "${customer.user.nombre}" (${customer.user.email || customer.whatsapp}) dado de baja lógicamente. Se preservó el historial de órdenes y se liberaron ${customer.subscriptions.length} pantalla(s) al inventario.`,
       entidad: 'Customer',
       entidadId: id,
+      valoresAnteriores: previousData,
+      valoresNuevos: nextData,
       detalles: {
         clienteId: id,
         nombre: customer.user.nombre,
         email: customer.user.email,
         suscripcionesLiberadas: customer.subscriptions.length,
-        ordenesAfectadas: customer.orders.length,
+        ordenesPreservadas: customer.orders.length,
       },
       exito: true,
     });
 
     return {
-      message: `Cliente ${customer.user.nombre} eliminado exitosamente. Cuentas asociadas liberadas al inventario disponible.`,
+      message: `Cliente ${customer.user.nombre} dado de baja lógicamente con éxito. Las pantallas activas fueron devueltas al inventario disponible.`,
+    };
+  }
+
+  // =========================================================================
+  // SRS REQ. ADICIONAL 1 (PUNTO 23): MODAL WHATSAPP CON PROMOCIÓN PERSONALIZADA
+  // =========================================================================
+  async generateCustomPromoMessage(
+    customerId: string,
+    motivo: 'RENOVACION' | 'VENTA_CRUZADA' | 'PROMOCION_LEALTAD' | 'GARANTIA_SEGUIMIENTO' | 'RECUPERACION' = 'PROMOCION_LEALTAD',
+  ) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      include: {
+        user: true,
+        subscriptions: {
+          include: {
+            plan: {
+              include: { service: true },
+            },
+          },
+          orderBy: { fechaVencimiento: 'desc' },
+        },
+        orders: {
+          where: { estado: OrderStatus.PAGADO },
+          include: {
+            items: {
+              include: {
+                plan: { include: { service: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!customer) throw new NotFoundException('Cliente no encontrado');
+
+    const nombre = toTitleCase(customer.user.nombre || 'Estimado(a) Cliente');
+    const whatsapp = normalizeE164(customer.whatsapp || customer.user.phone);
+
+    // Identificar plataformas contratadas
+    const plataformasCompradas = Array.from(
+      new Set(
+        customer.subscriptions
+          .map((s) => s.plan?.service?.nombre)
+          .filter(Boolean) as string[],
+      ),
+    );
+
+    const ultimaSub = customer.subscriptions[0] || null;
+    const ultimoServicio = ultimaSub?.plan?.service?.nombre || 'Streaming';
+    const ultimoPlan = ultimaSub?.plan?.nombrePlan || 'Plan Premium';
+
+    let mensaje = '';
+
+    switch (motivo) {
+      case 'RENOVACION':
+        mensaje =
+          `Hola ${nombre} 👋 Te saludamos desde *OASIS VIRTUAL STORE* ✨\n\n` +
+          `Queremos recordarte que tu servicio de *${ultimoServicio} (${ultimoPlan})* está próximo a vencer o venció recientemente ⏳\n\n` +
+          `🔥 *¡Renueva hoy mismo y no pierdas tu historial, perfiles ni descargas!* Además, mantendrás tu tarifa preferencial de cliente fidelizado.\n\n` +
+          `¿Deseas que te enviemos los datos de pago para dejarlo activo ahora mismo? 📲`;
+        break;
+
+      case 'VENTA_CRUZADA':
+        const serviciosRecomendados = ['Disney+ Premium', 'Max (HBO)', 'Spotify Premium', 'Prime Video']
+          .filter((s) => !plataformasCompradas.includes(s));
+        const recomendada = serviciosRecomendados[0] || 'nuestro Combo Especial';
+
+        mensaje =
+          `Hola ${nombre} 🍿 Esperamos que estés disfrutando al máximo tu *${ultimoServicio}* con nosotros 🎉\n\n` +
+          `Sabemos que te encantan las mejores películas y series, por eso hoy tenemos un *BENEFICIO EXCLUSIVO* para ti:\n` +
+          `🔥 Agrega *${recomendada}* a tu cuenta con un *15% de descuento especial* por ser cliente activo de OASIS VIRTUAL STORE ✨\n\n` +
+          `¿Te gustaría activarlo hoy y disfrutar de estrenos imperdibles? 🎬`;
+        break;
+
+      case 'GARANTIA_SEGUIMIENTO':
+        mensaje =
+          `Hola ${nombre} 👋 Te escribimos del equipo de soporte y calidad de *OASIS VIRTUAL STORE* 🛡️\n\n` +
+          `Nos comunicamos para verificar si tu servicio de *${ultimoServicio}* está funcionando con total normalidad y fluidez tras la atención brindada 📺\n\n` +
+          `Tu satisfacción es nuestra máxima prioridad. ¿Todo se encuentra en orden o requieres algún ajuste adicional? Estamos atentos para apoyarte ✨`;
+        break;
+
+      case 'RECUPERACION':
+        mensaje =
+          `¡Hola ${nombre}! 🎉 En *OASIS VIRTUAL STORE* te hemos extrañado mucho ✨\n\n` +
+          `Queremos que vuelvas a disfrutar del mejor entretenimiento al mejor precio del mercado 🍿\n\n` +
+          `🎁 *CUPÓN DE BIENVENIDA:* Reactiva cualquier plataforma hoy (Netflix, Disney+, Max, etc.) y recibe *$3.000 COP de descuento directo* en tu orden 🚀\n\n` +
+          `¿Cuál plataforma quisieras disfrutar este mes? Responde a este mensaje para activar tu cupón 📲`;
+        break;
+
+      case 'PROMOCION_LEALTAD':
+      default:
+        mensaje =
+          `Hola ${nombre} ✨ ¡Gracias por ser parte de la familia *OASIS VIRTUAL STORE*! 🌟\n\n` +
+          `Por tu excelente fidelidad con nosotros, hoy tenemos disponible una promoción VIP en renovación y combos especiales multi-pantalla 🎁\n\n` +
+          `🚀 Disfruta de soporte prioritario 24/7 y garantía total garantizada.\n` +
+          `¿Deseas conocer nuestro catálogo promocional vigente? 📲`;
+        break;
+    }
+
+    const encodedText = encodeURIComponent(mensaje);
+    const cleanPhone = whatsapp.replace('+', '');
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
+
+    return {
+      cliente: {
+        id: customer.id,
+        nombre,
+        whatsapp,
+        plataformasCompradas,
+        totalSuscripciones: customer.subscriptions.length,
+        totalOrdenes: customer.orders.length,
+      },
+      motivo,
+      mensajeGenerado: mensaje,
+      whatsappUrl,
     };
   }
 }
+

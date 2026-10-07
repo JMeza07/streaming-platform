@@ -27,6 +27,16 @@ model User {
   modulosPermitidos String[]  @default([]) @map("modulos_permitidos")
   twoFactorEnabled  Boolean   @default(false) @map("two_factor_enabled")
   twoFactorSecret   String?   @map("two_factor_secret")
+
+  // Seguridad de sesión (SRS RNF-S05 / RF-036)
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lastFailedLoginAt   DateTime? @map("last_failed_login_at")
+  lockedUntil         DateTime? @map("locked_until")
+  lastActivityAt      DateTime? @map("last_activity_at")
+
+  // Borrado lógico (SRS 2.3)
+  deletedAt         DateTime? @map("deleted_at")
+
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
   
@@ -34,43 +44,97 @@ model User {
   customer          Customer?
   affiliate         Affiliate?
   ventasRealizadas  Order[]   @relation("OrderVendedor")
+  refreshTokens     RefreshToken[]
+  cambiosClaveRealizados PasswordChange[] @relation("PasswordChangeAsesor")
+  shifts            ShiftReport[]
   
   @@map("users")
 }
 
+// Refresh tokens rotativos (SRS RNF-S06). Solo se almacena el hash SHA-256.
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  replacedBy String?   @map("replaced_by")
+  ip         String?
+  userAgent  String?   @map("user_agent")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
 // ============ CATÁLOGO ============
 model Service {
-  id           String        @id @default(uuid())
-  nombre       String        @unique
-  logoUrl      String?       @map("logo_url")
+  id           String          @id @default(uuid())
+  nombre       String          @unique
+  logoUrl      String?         @map("logo_url")
   descripcion  String?
-  activo       Boolean       @default(true)
-  createdAt    DateTime      @default(now()) @map("created_at")
+  usaPin       Boolean         @default(true) @map("usa_pin")
+  activo       Boolean         @default(true)
+  createdAt    DateTime        @default(now()) @map("created_at")
   
-  plans        Plan[]
-  rootAccounts RootAccount[]
+  plans          Plan[]
+  rootAccounts   RootAccount[]
+  providerPrices ProviderPrice[]
   
   @@map("services")
 }
 
 model Plan {
-  id                   String         @id @default(uuid())
-  serviceId            String         @map("service_id")
-  nombrePlan           String         @map("nombre_plan")
+  id                   String          @id @default(uuid())
+  serviceId            String          @map("service_id")
+  nombrePlan           String          @map("nombre_plan")
   precio               Decimal
   resolucion           String?
-  pantallasSimultaneas Int            @default(1) @map("pantallas_simultaneas")
-  duracionDias         Int            @default(30) @map("duracion_dias")
-  garantiaDias         Int            @default(30) @map("garantia_dias")
-  activo               Boolean        @default(true)
-  createdAt            DateTime       @default(now()) @map("created_at")
+  pantallasSimultaneas Int             @default(1) @map("pantallas_simultaneas")
+  duracionDias         Int             @default(30) @map("duracion_dias")
+  garantiaDias         Int             @default(30) @map("garantia_dias")
+  usaPin               Boolean?        @map("usa_pin")
+  activo               Boolean         @default(true)
+  createdAt            DateTime        @default(now()) @map("created_at")
   
-  service              Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  service              Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   accounts             Account[]
   subscriptions        Subscription[]
   orderItems           OrderItem[]
+  comboItems           ComboItem[]
+  providerPrices       ProviderPrice[]
   
   @@map("plans")
+}
+
+// Combos de plataformas (SRS RF-006)
+model Combo {
+  id                  String      @id @default(uuid())
+  nombre              String      @unique
+  descripcion         String?
+  precioCombo         Decimal     @map("precio_combo")
+  descuentoPorcentaje Decimal?    @default(0) @map("descuento_porcentaje")
+  activo              Boolean     @default(true)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  items               ComboItem[]
+
+  @@map("combos")
+}
+
+model ComboItem {
+  id        String   @id @default(uuid())
+  comboId   String   @map("combo_id")
+  planId    String   @map("plan_id")
+  cantidad  Int      @default(1)
+
+  combo     Combo    @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("combo_items")
 }
 
 // ============ PROVEEDORES ============
@@ -86,12 +150,37 @@ model Provider {
   createdAt    DateTime              @default(now()) @map("created_at")
   updatedAt    DateTime              @updatedAt @map("updated_at")
 
-  rootAccounts RootAccount[]
-  batches      SupplierBatch[]
-  incidents    RootAccountIncident[]
-  accounts     Account[]
+  rootAccounts        RootAccount[]
+  batches             SupplierBatch[]
+  incidents           RootAccountIncident[]
+  accounts            Account[]
+  supportTickets      SupportTicket[]
+  rootAccountRenewals RootAccountRenewal[]
+  prices              ProviderPrice[]
 
   @@map("providers")
+}
+
+// Precios de proveedor por plataforma (SRS RF-024)
+model ProviderPrice {
+  id           String    @id @default(uuid())
+  providerId   String    @map("provider_id")
+  serviceId    String?   @map("service_id")
+  planId       String?   @map("plan_id")
+  precio       Decimal
+  duracionDias Int       @default(30) @map("duracion_dias")
+  moneda       String    @default("COP")
+  notas        String?
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  provider     Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  service      Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  plan         Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([providerId, serviceId])
+  @@map("provider_prices")
 }
 
 // ============ CUENTAS RAÍZ (MASTER / ROOT ACCOUNTS) ============
@@ -115,6 +204,11 @@ model RootAccount {
   maxPerfiles            Int                   @default(5) @map("max_perfiles")
   requiresPasswordChange Boolean               @default(false) @map("requires_password_change")
 
+  // Control de Facturación con Proveedor (SRS RF-031)
+  diaFacturacion         Int?                  @map("dia_facturacion") // Día del mes (1-31)
+  alertaFacturacionDias  Int                   @default(5) @map("alerta_facturacion_dias")
+  metodoPagoProveedor    String?               @map("metodo_pago_proveedor")
+
   // Credenciales IMAP para lectura de códigos de hogar / IP (Netflix, Disney+, etc.)
   imapHost               String?               @map("imap_host")
   imapPort               Int?                  @default(993) @map("imap_port")
@@ -130,6 +224,9 @@ model RootAccount {
   accounts               Account[]
   incidents              RootAccountIncident[]
   infractions            ProfileInfraction[]
+  passwordChanges        PasswordChange[]
+  cemeteryEntry          CemeteryAccount[]
+  renewals               RootAccountRenewal[]
 
   @@map("root_accounts")
 }
@@ -161,6 +258,7 @@ model Account {
   batchId               String?             @map("batch_id")
   reservedUntil         DateTime?           @map("reserved_until")
   reservedByCustomerId  String?             @map("reserved_by_customer_id")
+  deletedAt             DateTime?           @map("deleted_at")
   createdAt             DateTime            @default(now()) @map("created_at")
   updatedAt             DateTime            @updatedAt @map("updated_at")
   
@@ -170,6 +268,7 @@ model Account {
   batch                 SupplierBatch?      @relation(fields: [batchId], references: [id])
   subscriptions         Subscription[]
   infractions           ProfileInfraction[]
+  passwordChanges       PasswordChange[]
   
   @@index([planId, emailCuenta])
   @@map("accounts")
@@ -181,10 +280,12 @@ model Customer {
   userId              String              @unique @map("user_id")
   whatsapp            String              @unique
   pais                String?
+  indicativo          String?             @default("+57")
   optOutWhatsapp      Boolean             @default(false) @map("opt_out_whatsapp")
   walletBalance       Decimal             @default(0) @map("wallet_balance")
   strikes             Int                 @default(0)
   estadoUsuario       String              @default("ACTIVO") @map("estado_usuario")
+  deletedAt           DateTime?           @map("deleted_at")
   createdAt           DateTime            @default(now()) @map("created_at")
   
   user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -222,6 +323,16 @@ model Subscription {
   credencialesVistasAt DateTime?          @map("credenciales_vistas_at")
   diasPendientes       Int                @default(0) @map("dias_pendientes")
   congeladoAt          DateTime?          @map("congelado_at")
+
+  // Campos SRS SGVS
+  clase                String             @default("NUEVA") // NUEVA, RENOVACION, GARANTIA
+  costoPerfil          Decimal?           @default(0) @map("costo_perfil")
+  ganancia             Decimal?           @default(0)
+  fechaUltimoCambioClave DateTime?        @map("fecha_ultimo_cambio_clave")
+  estadoLibre          String             @default("VENDIDA") @map("estado_libre") // LIBRE, VENDIDA, CORTAR, ERROR (RN-004)
+  ultimoAvisoVencimiento DateTime?        @map("ultimo_aviso_vencimiento")
+  notificadoWhatsapp   Boolean            @default(false) @map("notificado_whatsapp")
+
   createdAt            DateTime           @default(now()) @map("created_at")
   updatedAt            DateTime           @updatedAt @map("updated_at")
   
@@ -254,6 +365,14 @@ model Order {
   estado                   OrderStatus  @default(PENDIENTE)
   metodoPago               String?      @map("metodo_pago")
   referenciaExterna        String?      @map("referencia_externa")
+  
+  // Campos SRS SGVS
+  clase                    String       @default("NUEVA") // NUEVA, RENOVACION, GARANTIA
+  banco                    String?      // NEQUI, DAVIPLATA, BANCOLOMBIA, MOVII, DALE, OTRO
+  aut                      String?      // Código alfanumérico comprobante bancario
+  costoTotal               Decimal?     @default(0) @map("costo_total")
+  gananciaNeta             Decimal?     @default(0) @map("ganancia_neta")
+  
   comprobanteUrl           String?      @map("comprobante_url")
   comprobanteVerificado    Boolean      @default(false) @map("comprobante_verificado")
   comprobanteVerificadoAt  DateTime?    @map("comprobante_verificado_at")
@@ -410,22 +529,69 @@ model NotificationLog {
   @@map("notification_logs")
 }
 
-// ============ SOPORTE ============
+// ============ SOPORTE Y GARANTÍAS ============
 model SupportTicket {
-  id             String       @id @default(uuid())
-  subscriptionId String       @map("subscription_id")
-  customerId     String       @map("customer_id")
-  motivoReporte  String       @map("motivo_reporte")
-  evidenciaUrl   String?      @map("evidencia_url")
-  estado         String       @default("pendiente_revision")
-  resueltoPor    String?      @map("resuelto_por")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  resolvedAt     DateTime?    @map("resolved_at")
+  id                    String       @id @default(uuid())
+  subscriptionId        String       @map("subscription_id")
+  customerId            String       @map("customer_id")
+  providerId            String?      @map("provider_id")
+  motivoReporte         String       @map("motivo_reporte")
+  tipoError             String       @default("ERROR_CLAVE") @map("tipo_error") // ERROR_CLAVE, ACTUALIZAR_PAGO, CLAVE_INCORRECTA, PERFIL_BLOQUEADO, OTRO
+  claveReportada        String?      @map("clave_reportada")
+  claveAlMomento        String?      @map("clave_al_momento")
+  coincideClave         Boolean      @default(true) @map("coincide_clave")
+  claveNuevaEntregada   String?      @map("clave_nueva_entregada")
+  notificadoAlCliente   Boolean      @default(false) @map("notificado_al_cliente")
+  evidenciaUrl          String?      @map("evidencia_url")
+  estado                String       @default("pendiente_revision") // pendiente_revision, en_proveedor, resuelto, cancelado
+  resueltoPor           String?      @map("resuelto_por")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  resolvedAt            DateTime?    @map("resolved_at")
   
-  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
-  customer       Customer     @relation(fields: [customerId], references: [id])
+  subscription          Subscription @relation(fields: [subscriptionId], references: [id])
+  customer              Customer     @relation(fields: [customerId], references: [id])
+  provider              Provider?    @relation(fields: [providerId], references: [id], onDelete: SetNull)
   
   @@map("support_tickets")
+}
+
+// ============ HISTORIAL DE CAMBIOS DE CLAVE (SRS RF-010) ============
+model PasswordChange {
+  id                  String       @id @default(uuid())
+  rootAccountId       String?      @map("root_account_id")
+  accountId           String?      @map("account_id")
+  claveAnterior       String?      @map("clave_anterior")
+  claveNueva          String       @map("clave_nueva")
+  motivo              String?
+  asesorId            String?      @map("asesor_id")
+  asesorNombre        String?      @map("asesor_nombre")
+  clientesNotificados Int          @default(0) @map("clientes_notificados")
+  createdAt           DateTime     @default(now()) @map("created_at")
+
+  rootAccount         RootAccount? @relation(fields: [rootAccountId], references: [id], onDelete: SetNull)
+  account             Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  asesor              User?        @relation("PasswordChangeAsesor", fields: [asesorId], references: [id], onDelete: SetNull)
+
+  @@index([rootAccountId])
+  @@index([accountId])
+  @@map("password_changes")
+}
+
+// ============ CEMENTERIO DE CUENTAS / LISTA NEGRA (SRS RF-027 / RF-035 / RF-011) ============
+model CemeteryAccount {
+  id            String       @id @default(uuid())
+  email         String       @unique
+  plataforma    String?
+  motivoBaja    String       @map("motivo_baja")
+  estadoCuenta  String       @default("COMPROMETIDA") @map("estado_cuenta") // COMPROMETIDA, CAIDA_PROVEEDOR, VENCIDA_NO_RENOVAR, FRAUDE
+  rootAccountId String?      @map("root_account_id")
+  registradoPor String?      @map("registrado_por")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  rootAccount   RootAccount? @relation(fields: [rootAccountId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@map("cemetery_accounts")
 }
 
 // ============ CONFIG WHATSAPP ============
@@ -460,6 +626,7 @@ model SystemSetting {
   comisionBase         Int      @default(10) @map("comision_base")
   garantiaDiasBase     Int      @default(30) @map("garantia_dias_base")
   mediosPago           Json?    @default("[]") @map("medios_pago")
+  heroConfig           Json?    @default("{}") @map("hero_config")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
   @@map("system_settings")
@@ -482,6 +649,7 @@ enum AuditCategory {
   USUARIOS
   CLIENTES
   FINANZAS
+  CAJA
   SISTEMA
 }
 
@@ -492,6 +660,8 @@ model AuditLog {
   severidad     AuditSeverity @default(INFO)
   descripcion   String
   detalles      Json?
+  valoresAnteriores Json?     @map("valores_anteriores")
+  valoresNuevos     Json?     @map("valores_nuevos")
   ip            String?
   userAgent     String?       @map("user_agent")
   entidadTipo   String?       @map("entidad_tipo")
@@ -512,4 +682,81 @@ model AuditLog {
   @@index([usuarioId])
   @@index([entidadId])
   @@map("audit_logs")
+}
+
+// ============ RENOVACIONES DE CUENTAS MATRICES (SRS Req. Adicional 10) ============
+model RootAccountRenewal {
+  id                     String       @id @default(uuid())
+  rootAccountId          String       @map("root_account_id")
+  providerId             String?      @map("provider_id")
+  fechaRenovacion        DateTime     @default(now()) @map("fecha_renovacion")
+  diasExtendidos         Int          @default(30) @map("dias_extendidos")
+  fechaVencimientoPrevia DateTime?    @map("fecha_vencimiento_previa")
+  nuevaFechaVencimiento  DateTime     @map("nueva_fecha_vencimiento")
+  costoRenovacion        Decimal      @map("costo_renovacion")
+  costoAnterior          Decimal?     @map("costo_anterior")
+  usuarioId              String?      @map("usuario_id")
+  usuarioNombre          String?      @map("usuario_nombre")
+  notas                  String?
+  createdAt              DateTime     @default(now()) @map("created_at")
+
+  rootAccount            RootAccount  @relation(fields: [rootAccountId], references: [id], onDelete: Cascade)
+  provider               Provider?    @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@index([rootAccountId])
+  @@map("root_account_renewals")
+}
+
+// ============ REPORTES DE TURNO / CAJA (SRS RF-022 / F1.8) ============
+enum ShiftStatus {
+  ABIERTO
+  CERRADO
+}
+
+model ShiftReport {
+  id             String          @id @default(uuid())
+  asesorId       String          @map("asesor_id")
+  asesorNombre   String          @map("asesor_nombre")
+  fechaTurno     DateTime        @default(now()) @map("fecha_turno")
+  horaInicio     DateTime        @default(now()) @map("hora_inicio")
+  horaFin        DateTime?       @map("hora_fin")
+  baseInicial    Decimal         @default(0) @map("base_inicial")
+  totalVentas    Decimal         @default(0) @map("total_ventas")
+  totalGastos    Decimal         @default(0) @map("total_gastos")
+  totalEntradas  Decimal         @default(0) @map("total_entradas")
+  saldoEsperado  Decimal         @default(0) @map("saldo_esperado")
+  saldoReal      Decimal?        @map("saldo_real")
+  diferencia     Decimal?        @default(0)
+  estado         ShiftStatus     @default(ABIERTO)
+  novedades      String?
+  observaciones  String?
+  metrics        Json?           @default("{}") // Desglose por banco, cantidad de pedidos, etc.
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  asesor         User            @relation(fields: [asesorId], references: [id], onDelete: Cascade)
+  movements      ShiftMovement[]
+
+  @@index([asesorId])
+  @@index([fechaTurno])
+  @@map("shift_reports")
+}
+
+model ShiftMovement {
+  id             String       @id @default(uuid())
+  shiftId        String       @map("shift_id")
+  tipo           String       // ENTRADA, SALIDA, VENTA_SISTEMA, GASTO, ANULACION
+  concepto       String
+  monto          Decimal
+  metodoPago     String?      @map("metodo_pago")
+  orderId        String?      @map("order_id")
+  operadorId     String?      @map("operador_id")
+  operadorNombre String?      @map("operador_nombre")
+  observaciones  String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  shift          ShiftReport  @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([shiftId])
+  @@map("shift_movements")
 }

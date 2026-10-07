@@ -43,11 +43,14 @@ export default function SuppliersPage() {
   const [services, setServices] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'providers' | 'rates'>('providers');
+  const [bestRates, setBestRates] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
   // Modales
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showPriceModal, setShowPriceModal] = useState(false);
   const [editingProvider, setEditingProvider] = useState<any | null>(null);
   const [selectedProviderDetail, setSelectedProviderDetail] = useState<any | null>(null);
   const [showBatchModal, setShowBatchModal] = useState<any | null>(null);
@@ -58,6 +61,16 @@ export default function SuppliersPage() {
     contacto: '',
     telefono: '',
     email: '',
+    notas: '',
+  });
+
+  // Formulario Precio de Proveedor (SRS RF-024)
+  const [newPriceForm, setNewPriceForm] = useState({
+    providerId: '',
+    serviceId: '',
+    precio: '',
+    duracionDias: 30,
+    moneda: 'COP',
     notas: '',
   });
 
@@ -92,18 +105,52 @@ export default function SuppliersPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [provRes, srvRes, plansRes] = await Promise.all([
+      const [provRes, srvRes, plansRes, ratesRes] = await Promise.all([
         api.get('/providers'),
         api.get('/services').catch(() => ({ data: [] })),
         api.get('/plans').catch(() => ({ data: [] })),
+        api.get('/providers/prices/best-rates').catch(() => ({ data: [] })),
       ]);
       setProviders(provRes.data || []);
       setServices(srvRes.data || []);
       setPlans(plansRes.data || []);
+      setBestRates(ratesRes.data || []);
     } catch (err: any) {
       console.error('Error cargando datos de proveedores:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSavePrice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormLoading(true);
+    setFormError('');
+    try {
+      await api.post('/providers/prices', {
+        providerId: newPriceForm.providerId,
+        serviceId: newPriceForm.serviceId,
+        precio: Number(newPriceForm.precio),
+        duracionDias: Number(newPriceForm.duracionDias || 30),
+        moneda: newPriceForm.moneda || 'COP',
+        notas: newPriceForm.notas || null,
+      });
+      setShowPriceModal(false);
+      setNewPriceForm({
+        providerId: '',
+        serviceId: '',
+        precio: '',
+        duracionDias: 30,
+        moneda: 'COP',
+        notas: '',
+      });
+      setSuccessMsg('¡Tarifa de proveedor guardada exitosamente!');
+      setTimeout(() => setSuccessMsg(''), 3000);
+      fetchData();
+    } catch (err: any) {
+      setFormError(err.response?.data?.message || 'Error al guardar la tarifa');
+    } finally {
+      setFormLoading(false);
     }
   };
 
@@ -421,7 +468,26 @@ export default function SuppliersPage() {
             <Download className="w-4 h-4 text-emerald-400" />
             Exportar CSV
           </button>
-          {isAdmin && (
+          {isAdmin && activeTab === 'rates' && (
+            <button
+              onClick={() => {
+                setNewPriceForm({
+                  providerId: providers[0]?.id || '',
+                  serviceId: services[0]?.id || '',
+                  precio: '',
+                  duracionDias: 30,
+                  moneda: 'COP',
+                  notas: '',
+                });
+                setShowPriceModal(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-sky-900/30 hover:scale-[1.02]"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva Tarifa Negociada
+            </button>
+          )}
+          {isAdmin && activeTab === 'providers' && (
             <button
               onClick={() => {
                 setEditingProvider(null);
@@ -437,6 +503,36 @@ export default function SuppliersPage() {
         </div>
       </div>
 
+      {/* Tabs Navigation */}
+      <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
+        <button
+          onClick={() => setActiveTab('providers')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'providers'
+              ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Directorio de Proveedores ({providers.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('rates')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'rates'
+              ? 'bg-sky-600/20 text-sky-400 border border-sky-500/30'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          <span>Tarifas y Comparador de Márgenes ({bestRates.length})</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-300 text-[10px] font-semibold">
+            Rentabilidad
+          </span>
+        </button>
+      </div>
+
       {/* MENSAJE DE ÉXITO */}
       {successMsg && (
         <div className="flex items-center justify-between p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-300 text-sm animate-fade-in">
@@ -450,8 +546,11 @@ export default function SuppliersPage() {
         </div>
       )}
 
-      {/* TARJETAS DE MÉTRICAS GLOBALES */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ================= PESTAÑA 1: DIRECTORIO DE PROVEEDORES ================= */}
+      {activeTab === 'providers' && (
+        <>
+          {/* TARJETAS DE MÉTRICAS GLOBALES */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Costo Invertido */}
         <div className="p-4 bg-gray-900/60 border border-gray-800/80 rounded-2xl relative overflow-hidden backdrop-blur-sm">
           <div className="absolute top-0 right-0 w-24 h-24 bg-rose-500/5 rounded-full blur-xl pointer-events-none" />
@@ -780,6 +879,112 @@ export default function SuppliersPage() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {/* ================= PESTAÑA 2: COMPARADOR DE TARIFAS Y MÁRGENES ================= */}
+      {activeTab === 'rates' && (
+        <div className="bg-gray-900/60 border border-sky-900/30 rounded-2xl p-6 backdrop-blur-md space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-800">
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-sky-400" />
+                <span>Precios de Proveedor por Plataforma & Comparador de Márgenes</span>
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Compara automáticamente cuál proveedor ofrece el costo más bajo por plataforma y optimiza tu margen comercial neto.
+              </p>
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  setNewPriceForm({
+                    providerId: providers[0]?.id || '',
+                    serviceId: services[0]?.id || '',
+                    precio: '',
+                    duracionDias: 30,
+                    moneda: 'COP',
+                    notas: '',
+                  });
+                  setShowPriceModal(true);
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-sky-950/40"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Registrar Tarifa</span>
+              </button>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-gray-300">
+              <thead className="bg-gray-950/80 text-gray-400 uppercase font-semibold text-[10px] tracking-wider border-b border-gray-800">
+                <tr>
+                  <th className="py-3 px-4">Plataforma</th>
+                  <th className="py-3 px-4">Mejor Proveedor (Menor Costo)</th>
+                  <th className="py-3 px-4 text-right">Costo Proveedor</th>
+                  <th className="py-3 px-4 text-right">Precio PVP Oficial</th>
+                  <th className="py-3 px-4 text-right">Margen Estimado ($ COP)</th>
+                  <th className="py-3 px-4 text-center">Margen Comercial</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800/60 font-medium">
+                {bestRates.map((rate) => (
+                  <tr key={rate.serviceId} className="hover:bg-gray-800/30 transition-colors">
+                    <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2">
+                      {rate.logoUrl ? (
+                        <img src={rate.logoUrl} alt={rate.serviceNombre} className="w-6 h-6 object-contain rounded p-0.5 bg-black/40" />
+                      ) : (
+                        <div className="w-6 h-6 rounded bg-red-950 text-red-400 flex items-center justify-center font-bold text-[10px]">
+                          {rate.serviceNombre.substring(0, 2)}
+                        </div>
+                      )}
+                      <span>{rate.serviceNombre}</span>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      {rate.mejorProveedor ? (
+                        <div className="space-y-0.5">
+                          <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+                            <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>{rate.mejorProveedor.nombre}</span>
+                          </div>
+                          <span className="text-[10px] text-gray-400">
+                            Tasa de Fallo: {rate.mejorProveedor.tasaFallo}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-500 italic text-[11px]">Sin tarifas registradas</span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono font-semibold text-white">
+                      {rate.mejorProveedor ? `$${Number(rate.mejorProveedor.costo).toLocaleString('es-CO')}` : '—'}
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono font-semibold text-white">
+                      ${Number(rate.precioVentaPVP).toLocaleString('es-CO')}
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono font-bold text-emerald-400">
+                      {rate.margenEstimadoCOP > 0 ? `+$${Number(rate.margenEstimadoCOP).toLocaleString('es-CO')}` : '—'}
+                    </td>
+                    <td className="py-3.5 px-4 text-center">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] ${
+                          rate.porcentajeMargen >= 40
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : rate.porcentajeMargen > 0
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            : 'bg-gray-800 text-gray-400'
+                        }`}
+                      >
+                        {rate.porcentajeMargen > 0 ? `${rate.porcentajeMargen}%` : 'N/A'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: CREAR / EDITAR PROVEEDOR */}
       {showAddModal && (
@@ -1157,6 +1362,130 @@ export default function SuppliersPage() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL: REGISTRAR TARIFA NEGOCIADA DE PROVEEDOR (SRS RF-024) */}
+      {showPriceModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-sky-900/50 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-scale-up">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-sky-400" />
+                <span>Registrar Tarifa de Proveedor</span>
+              </h2>
+              <button
+                onClick={() => setShowPriceModal(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePrice} className="p-5 space-y-4 text-xs">
+              {formError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">
+                  Proveedor Mayorista <span className="text-sky-400">*</span>
+                </label>
+                <select
+                  required
+                  value={newPriceForm.providerId}
+                  onChange={(e) => setNewPriceForm({ ...newPriceForm, providerId: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white outline-none focus:border-sky-500"
+                >
+                  <option value="">Selecciona el proveedor</option>
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} ({p.contacto || 'Mayorista'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">
+                  Plataforma / Servicio <span className="text-sky-400">*</span>
+                </label>
+                <select
+                  required
+                  value={newPriceForm.serviceId}
+                  onChange={(e) => setNewPriceForm({ ...newPriceForm, serviceId: e.target.value })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white outline-none focus:border-sky-500"
+                >
+                  <option value="">Selecciona la plataforma</option>
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 font-semibold mb-1">
+                    Costo Compra (COP) <span className="text-sky-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={500}
+                    value={newPriceForm.precio}
+                    onChange={(e) => setNewPriceForm({ ...newPriceForm, precio: e.target.value })}
+                    placeholder="Ej. 12000"
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white font-mono outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 font-semibold mb-1">Duración (Días)</label>
+                  <input
+                    type="number"
+                    value={newPriceForm.duracionDias}
+                    onChange={(e) =>
+                      setNewPriceForm({ ...newPriceForm, duracionDias: Number(e.target.value) || 30 })
+                    }
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Notas / Condiciones Especiales</label>
+                <input
+                  type="text"
+                  value={newPriceForm.notas}
+                  onChange={(e) => setNewPriceForm({ ...newPriceForm, notas: e.target.value })}
+                  placeholder="Ej. Precio por compra superior a 10 cuentas"
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-white outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3 border-t border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setShowPriceModal(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={formLoading}
+                  className="px-5 py-2 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-sky-950/40 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Guardar Tarifa</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

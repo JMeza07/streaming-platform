@@ -14,5 +14,9 @@ export class CreateServiceDto {
 
   @IsOptional()
   @IsBoolean()
+  usaPin?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   activo?: boolean;
 }

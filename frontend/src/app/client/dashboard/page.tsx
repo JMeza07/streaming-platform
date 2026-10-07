@@ -39,6 +39,10 @@ import {
   Ban,
   Smartphone,
   KeyRound,
+  Package,
+  Tag,
+  Percent,
+  Flame,
 } from 'lucide-react';
 import TablePagination from '@/components/TablePagination';
 import { useDialog } from '@/components/Dialog';
@@ -106,9 +110,10 @@ export default function ClientDashboardPage() {
   const [isEditingViewingReceipt, setIsEditingViewingReceipt] = useState(false);
   const [previewLightboxUrl, setPreviewLightboxUrl] = useState<string | null>(null);
 
-  // Catálogo de Planes Disponibles dentro del Portal
+  // Catálogo de Planes y Combos Disponibles dentro del Portal
   const [services, setServices] = useState<any[]>([]);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
+  const [combos, setCombos] = useState<any[]>([]);
   const [catalogCategory, setCatalogCategory] = useState<string>('all');
   const [catalogLoading, setCatalogLoading] = useState(false);
 
@@ -241,7 +246,7 @@ export default function ClientDashboardPage() {
   const fetchClientData = async () => {
     try {
       setLoading(true);
-      const [sumRes, subsRes, ordRes, tickRes, servRes, plansRes, setRes] = await Promise.all([
+      const [sumRes, subsRes, ordRes, tickRes, servRes, plansRes, setRes, combosRes] = await Promise.all([
         api.get('/portal/summary'),
         api.get('/portal/subscriptions'),
         api.get('/portal/orders'),
@@ -249,6 +254,7 @@ export default function ClientDashboardPage() {
         api.get('/services'),
         api.get('/plans'),
         api.get('/settings').catch(() => ({ data: null })),
+        api.get('/combos').catch(() => ({ data: [] })),
       ]);
 
       setSummary(sumRes.data);
@@ -257,6 +263,7 @@ export default function ClientDashboardPage() {
       setTickets(tickRes.data);
       setServices(servRes.data);
       setAvailablePlans(plansRes.data);
+      setCombos(combosRes.data || []);
       if (setRes?.data) setSettings(setRes.data);
 
       setProfileData({
@@ -876,13 +883,21 @@ export default function ClientDashboardPage() {
     e.preventDefault();
     if (!selectedSubForRenew) return;
 
+    if (!renewReceiptPreview || !renewReceiptPreview.trim()) {
+      await alert('Por favor selecciona y adjunta la imagen de tu comprobante de pago para procesar la renovación.', {
+        type: 'warning',
+        title: 'Comprobante Requerido',
+      });
+      return;
+    }
+
     setRenewLoading(true);
     setRenewErrorMsg('');
     try {
       const res = await api.post('/portal/renew', {
         subscriptionId: selectedSubForRenew.id,
         metodoPago: renewMethod,
-        comprobanteUrl: renewReceiptPreview || undefined,
+        comprobanteUrl: renewReceiptPreview,
       });
 
       setRenewSuccessData({
@@ -954,34 +969,34 @@ export default function ClientDashboardPage() {
       )}
 
       {/* Banner de Bienvenida y Resumen */}
-      <div className="bg-gradient-to-r from-red-950/40 via-gray-900/60 to-gray-900/40 border border-red-900/30 rounded-2xl p-6 backdrop-blur-md">
+      <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-6 shadow-2xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">
+            <span className="text-xs font-bold text-red-400 uppercase tracking-wider">
               Mi Panel de Suscripciones
             </span>
-            <h1 className="text-2xl font-bold text-white tracking-tight mt-0.5">
+            <h1 className="text-2xl font-black text-white tracking-tight mt-0.5">
               ¡Hola, {summary?.nombre || 'Cliente'}! 👋
             </h1>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-gray-300 mt-1">
               Aquí puedes ver tus accesos, copiar tus contraseñas, comprar nuevos planes y reportar problemas.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="px-4 py-2 bg-gray-950/80 border border-gray-800 rounded-xl text-center">
-              <span className="text-xs text-gray-400 block">Suscripciones</span>
+            <div className="px-4 py-2 bg-[#030712] border border-gray-800 rounded-xl text-center shadow-inner">
+              <span className="text-xs text-gray-400 block font-medium">Suscripciones</span>
               <span className="text-lg font-bold text-white">{summary?.suscripcionesActivas || 0}</span>
             </div>
-            <div className="px-4 py-2 bg-gray-950/80 border border-gray-800 rounded-xl text-center">
-              <span className="text-xs text-gray-400 block">Por Vencer</span>
+            <div className="px-4 py-2 bg-[#030712] border border-gray-800 rounded-xl text-center shadow-inner">
+              <span className="text-xs text-gray-400 block font-medium">Por Vencer</span>
               <span className="text-lg font-bold text-amber-400">{summary?.porVencer || 0}</span>
             </div>
 
             {/* BOTÓN RÁPIDO PARA COMPRAR NUEVO PLAN */}
             <button
               onClick={() => setActiveTab('plans')}
-              className="px-4 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-red-600/25 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+              className="px-4 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-red-600/30 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
             >
               <ShoppingBag className="w-4 h-4" />
               <span>Comprar Nuevo Plan</span>
@@ -990,14 +1005,14 @@ export default function ClientDashboardPage() {
         </div>
       </div>
 
-      {/* Tabs de Navegación */}
-      <div className="flex items-center gap-2 border-b border-gray-800 pb-2 overflow-x-auto">
+      {/* Tabs de Navegación con Fondos 100% Sólidos */}
+      <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-2 flex items-center gap-2 overflow-x-auto shadow-xl">
         <button
           onClick={() => setActiveTab('subs')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
             activeTab === 'subs'
-              ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-              : 'text-gray-400 hover:text-white hover:bg-gray-900'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 ring-1 ring-red-500/50'
+              : 'bg-[#030712] border border-gray-800 text-gray-200 hover:text-white hover:bg-gray-800'
           }`}
         >
           Mis Cuentas Activas ({subscriptions.length})
@@ -1006,22 +1021,22 @@ export default function ClientDashboardPage() {
         {/* PESTAÑA: PLANES DISPONIBLES / COMPRAR */}
         <button
           onClick={() => setActiveTab('plans')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'plans'
-              ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-              : 'text-gray-300 hover:text-white hover:bg-gray-900 border border-red-900/40 bg-red-950/20'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 ring-1 ring-red-500/50'
+              : 'bg-[#030712] border border-gray-800 text-gray-200 hover:text-white hover:bg-gray-800'
           }`}
         >
           <ShoppingBag className="w-3.5 h-3.5 text-red-400" />
-          <span>Planes Disponibles ({availablePlans.length})</span>
+          <span>Planes & Combos ({availablePlans.length + combos.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
             activeTab === 'orders'
-              ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-              : 'text-gray-400 hover:text-white hover:bg-gray-900'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 ring-1 ring-red-500/50'
+              : 'bg-[#030712] border border-gray-800 text-gray-200 hover:text-white hover:bg-gray-800'
           }`}
         >
           Historial de Pedidos ({orders.length})
@@ -1029,10 +1044,10 @@ export default function ClientDashboardPage() {
 
         <button
           onClick={() => setActiveTab('tickets')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
             activeTab === 'tickets'
-              ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-              : 'text-gray-400 hover:text-white hover:bg-gray-900'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 ring-1 ring-red-500/50'
+              : 'bg-[#030712] border border-gray-800 text-gray-200 hover:text-white hover:bg-gray-800'
           }`}
         >
           Garantías & Tickets ({tickets.length})
@@ -1040,10 +1055,10 @@ export default function ClientDashboardPage() {
 
         <button
           onClick={() => setActiveTab('profile')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
             activeTab === 'profile'
-              ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-              : 'text-gray-400 hover:text-white hover:bg-gray-900'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 ring-1 ring-red-500/50'
+              : 'bg-[#030712] border border-gray-800 text-gray-200 hover:text-white hover:bg-gray-800'
           }`}
         >
           Ajustes de Perfil
@@ -1056,7 +1071,7 @@ export default function ClientDashboardPage() {
       {activeTab === 'subs' && (
         <div className="space-y-4">
           {subscriptions.length === 0 ? (
-            <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-12 text-center space-y-4">
+            <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-12 text-center space-y-4 shadow-2xl">
               <Tv className="w-12 h-12 text-gray-600 mx-auto" />
               <div className="space-y-1">
                 <h3 className="text-base font-bold text-white">No tienes suscripciones activas</h3>
@@ -1081,7 +1096,7 @@ export default function ClientDashboardPage() {
                 return (
                   <div
                     key={sub.id}
-                    className="bg-gray-900/70 border border-gray-800/80 hover:border-gray-700/90 rounded-2xl p-6 backdrop-blur-md flex flex-col justify-between space-y-5 transition-all shadow-xl"
+                    className="bg-[#0b0f19] border border-gray-850 hover:border-gray-750 rounded-2xl p-6 flex flex-col justify-between space-y-5 transition-all shadow-2xl"
                   >
                     <div>
                       {/* Cabecera */}
@@ -1091,7 +1106,7 @@ export default function ClientDashboardPage() {
                             <img
                               src={sub.logoUrl}
                               alt={sub.servicio}
-                              className="w-10 h-10 object-contain rounded-xl bg-black/40 p-1 border border-gray-800 shrink-0"
+                              className="w-10 h-10 object-contain rounded-xl bg-black p-1 border border-gray-800 shrink-0"
                             />
                           ) : (
                             <div className="w-10 h-10 rounded-xl bg-red-950 border border-red-800 flex items-center justify-center font-bold text-red-400">
@@ -1110,34 +1125,34 @@ export default function ClientDashboardPage() {
                           <span
                             className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase ${
                               isExpiringSoon
-                                ? 'bg-amber-950/60 text-amber-400 border-amber-800/60'
-                                : 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60'
+                                ? 'bg-amber-950 text-amber-400 border-amber-800'
+                                : 'bg-emerald-950 text-emerald-400 border-emerald-800'
                             }`}
                           >
                             {sub.diasRestantes > 0
                               ? `${sub.diasRestantes} días restantes`
                               : 'Vence Hoy'}
                           </span>
-                          <span className="block text-[10px] text-gray-500 mt-0.5">
+                          <span className="block text-[10px] text-gray-400 mt-0.5">
                             Vence: {new Date(sub.fechaVencimiento).toLocaleDateString()}
                           </span>
                         </div>
                       </div>
 
                       {/* Tarjeta de Credenciales */}
-                      <div className="mt-4 bg-gray-950/90 border border-gray-800 rounded-xl p-4 space-y-2.5 text-xs">
+                      <div className="mt-4 bg-[#030712] border border-gray-800 rounded-xl p-4 space-y-2.5 text-xs shadow-inner">
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
                             Datos de Acceso
                           </span>
-                          <span className="text-[10px] text-emerald-400 font-medium">Garantía Activa</span>
+                          <span className="text-[10px] text-emerald-400 font-bold">Garantía Activa</span>
                         </div>
 
                         {/* Correo */}
-                        <div className="flex items-center justify-between bg-gray-900/80 px-3 py-2 rounded-lg border border-gray-850">
+                        <div className="flex items-center justify-between bg-gray-900 px-3 py-2 rounded-lg border border-gray-800">
                           <div className="overflow-hidden pr-2">
-                            <span className="text-[10px] text-gray-500 block">Correo / Usuario</span>
-                            <span className="font-mono text-gray-200 truncate block">
+                            <span className="text-[10px] text-gray-400 block font-semibold">Correo / Usuario</span>
+                            <span className="font-mono text-gray-200 truncate block text-xs">
                               {sub.credenciales?.email}
                             </span>
                           </div>
@@ -1155,10 +1170,10 @@ export default function ClientDashboardPage() {
                         </div>
 
                         {/* Contraseña */}
-                        <div className="flex items-center justify-between bg-gray-900/80 px-3 py-2 rounded-lg border border-gray-850">
+                        <div className="flex items-center justify-between bg-gray-900 px-3 py-2 rounded-lg border border-gray-800">
                           <div>
-                            <span className="text-[10px] text-gray-500 block">Contraseña</span>
-                            <span className="font-mono text-gray-200">
+                            <span className="text-[10px] text-gray-400 block font-semibold">Contraseña</span>
+                            <span className="font-mono text-gray-200 text-xs">
                               {isRevealed ? sub.credenciales?.password : '••••••••••••'}
                             </span>
                           </div>
@@ -1183,17 +1198,17 @@ export default function ClientDashboardPage() {
                           </div>
                         </div>
 
-                        {/* Perfil & PIN (Escenario 13) */}
+                        {/* Perfil & PIN */}
                         <div className="grid grid-cols-2 gap-2">
-                          <div className="bg-gray-900/80 px-3 py-2 rounded-lg border border-gray-850">
-                            <span className="text-[10px] text-gray-500 block">Perfil Asignado</span>
+                          <div className="bg-gray-900 px-3 py-2 rounded-lg border border-gray-800">
+                            <span className="text-[10px] text-gray-400 block font-semibold">Perfil Asignado</span>
                             <span className="font-semibold text-emerald-400 truncate block">
                               {sub.credenciales?.perfil || 'Principal'}
                             </span>
                           </div>
-                          <div className="bg-gray-900/80 px-3 py-2 rounded-lg border border-gray-850 flex items-center justify-between">
+                          <div className="bg-gray-900 px-3 py-2 rounded-lg border border-gray-800 flex items-center justify-between">
                             <div>
-                              <span className="text-[10px] text-gray-500 block">PIN de Perfil</span>
+                              <span className="text-[10px] text-gray-400 block font-semibold">PIN de Perfil</span>
                               <span className="font-mono font-bold text-amber-400">
                                 {sub.credenciales?.pin || 'Sin PIN'}
                               </span>
@@ -1226,7 +1241,7 @@ export default function ClientDashboardPage() {
                               sub.id
                             )
                           }
-                          className="w-full py-1.5 rounded-lg bg-gray-900 hover:bg-gray-850 border border-gray-800 text-[11px] font-medium text-gray-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          className="w-full py-2 rounded-lg bg-gray-900 hover:bg-gray-850 border border-gray-800 text-[11px] font-bold text-gray-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                         >
                           {copiedKey === sub.id ? (
                             <>
@@ -1247,7 +1262,7 @@ export default function ClientDashboardPage() {
                         {/* Escenario 7: Solicitar Código Hogar */}
                         <button
                           onClick={() => handleRequestHouseholdCode(sub)}
-                          className="px-2.5 py-2 bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-800/50 rounded-xl text-indigo-300 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          className="px-2.5 py-2 bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 rounded-xl text-indigo-200 hover:text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
                         >
                           <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
                           <span>Código Hogar / IP</span>
@@ -1263,7 +1278,7 @@ export default function ClientDashboardPage() {
                               loading: false,
                             })
                           }
-                          className="px-2.5 py-2 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/50 rounded-xl text-amber-300 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          className="px-2.5 py-2 bg-amber-950 hover:bg-amber-900 border border-amber-800 rounded-xl text-amber-200 hover:text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
                         >
                           <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                           <span>Pantalla Ocupada</span>
@@ -1272,7 +1287,7 @@ export default function ClientDashboardPage() {
                         {/* Escenario 12: Agregar Pantalla Prorrateada */}
                         <button
                           onClick={() => handleOpenUpgrade(sub)}
-                          className="px-2.5 py-2 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-800/50 rounded-xl text-emerald-300 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          className="px-2.5 py-2 bg-emerald-950 hover:bg-emerald-900 border border-emerald-800 rounded-xl text-emerald-200 hover:text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
                         >
                           <Tv className="w-3.5 h-3.5 text-emerald-400" />
                           <span>+ Pantalla (Prorrateo)</span>
@@ -1280,7 +1295,7 @@ export default function ClientDashboardPage() {
                       </div>
 
                       {/* ID de la Compra / Orden de Venta */}
-                      <div className="mt-3 bg-gray-950/70 border border-purple-900/30 rounded-xl px-3.5 py-2.5 flex items-center justify-between text-xs">
+                      <div className="mt-3 bg-[#030712] border border-gray-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2">
                           <FileText className="w-4 h-4 text-purple-400 shrink-0" />
                           <div>
@@ -1311,7 +1326,7 @@ export default function ClientDashboardPage() {
                               <button
                                 onClick={() => handleViewOrderDetails(sub.orderId, sub.order)}
                                 data-tooltip="Detalle"
-                                className="px-2.5 py-1.5 rounded-lg bg-purple-950/60 hover:bg-purple-900/70 border border-purple-800/60 text-purple-300 hover:text-white text-[11px] font-semibold transition-colors cursor-pointer inline-flex items-center gap-1"
+                                className="px-2.5 py-1.5 rounded-lg bg-purple-950 hover:bg-purple-900 border border-purple-800 text-purple-200 hover:text-white text-[11px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1 shadow-sm"
                               >
                                 <Eye className="w-3.5 h-3.5 text-purple-400" />
                                 <span>Ver Orden</span>
@@ -1329,7 +1344,7 @@ export default function ClientDashboardPage() {
                           setSelectedSubForWarranty(sub);
                           setShowWarrantyModal(true);
                         }}
-                        className="flex-1 py-2 rounded-xl bg-red-950/40 hover:bg-red-900/40 border border-red-900/40 text-red-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="flex-1 py-2 rounded-xl bg-red-950 hover:bg-red-900 border border-red-800 text-red-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                       >
                         <ShieldCheck className="w-3.5 h-3.5 text-red-400" />
                         <span>Garantía General</span>
@@ -1337,7 +1352,7 @@ export default function ClientDashboardPage() {
 
                       <button
                         onClick={() => handleOpenRenewModal(sub)}
-                        className="flex-1 py-2 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/40 border border-emerald-900/40 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="flex-1 py-2 rounded-xl bg-emerald-950 hover:bg-emerald-900 border border-emerald-800 text-emerald-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                       >
                         <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Renovar Cuenta</span>
@@ -1356,7 +1371,7 @@ export default function ClientDashboardPage() {
       {/* ========================================================================= */}
       {activeTab === 'plans' && (
         <div className="space-y-6">
-          <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
               <h2 className="text-base font-bold text-white">Planes y Servicios Disponibles</h2>
               <p className="text-xs text-gray-400">
@@ -1371,11 +1386,26 @@ export default function ClientDashboardPage() {
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
                   catalogCategory === 'all'
                     ? 'bg-red-600 text-white shadow-md'
-                    : 'bg-gray-950 text-gray-400 hover:text-white border border-gray-800'
+                    : 'bg-[#030712] text-gray-300 hover:text-white border border-gray-800'
                 }`}
               >
-                Todas ({availablePlans.length})
+                Todas ({availablePlans.length + combos.length})
               </button>
+
+              {combos.length > 0 && (
+                <button
+                  onClick={() => setCatalogCategory('combos')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                    catalogCategory === 'combos'
+                      ? 'bg-purple-600 text-white shadow-md'
+                      : 'bg-purple-950 text-purple-200 hover:text-white border border-purple-800'
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Combos ({combos.length})</span>
+                </button>
+              )}
+
               {services.map((s) => (
                 <button
                   key={s.id}
@@ -1383,7 +1413,7 @@ export default function ClientDashboardPage() {
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
                     catalogCategory === s.id
                       ? 'bg-red-600 text-white shadow-md'
-                      : 'bg-gray-950 text-gray-400 hover:text-white border border-gray-800'
+                      : 'bg-[#030712] text-gray-300 hover:text-white border border-gray-800'
                   }`}
                 >
                   {s.logoUrl && <img src={s.logoUrl} alt="" className="w-3 h-3 object-contain" />}
@@ -1393,15 +1423,189 @@ export default function ClientDashboardPage() {
             </div>
           </div>
 
-          {/* Grid de Planes Disponibles */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredAvailablePlans.map((plan) => {
-              const service = services.find((s) => s.id === plan.serviceId);
+          {/* COMBOS PROMOCIONALES MULTI-PLATAFORMA */}
+          {(catalogCategory === 'all' || catalogCategory === 'combos') && combos.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-purple-500/20 text-purple-400 rounded-xl border border-purple-500/30">
+                    <Package className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                      Combos Promocionales Multi-Plataforma
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
+                        Ahorro Especial
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-gray-400">
+                      Paquetes combinados con tarifas reducidas y activación inmediata
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {combos.map((combo) => {
+                  const regularTotal = combo.items?.reduce(
+                    (acc: number, item: any) => acc + (Number(item.plan?.precio || 0) * (item.cantidad || 1)),
+                    0
+                  ) || 0;
+                  const discountPct = combo.descuentoPorcentaje || (regularTotal > 0 ? Math.round(((regularTotal - combo.precioCombo) / regularTotal) * 100) : 0);
+                  const platformsNames = combo.items?.map((it: any) => it.plan?.service?.nombre || it.plan?.nombrePlan).filter(Boolean).join(' + ');
+
+                  return (
+                    <div
+                      key={combo.id}
+                      className="bg-[#0b0f19] border border-purple-900/60 hover:border-purple-500 rounded-2xl p-5 shadow-2xl flex flex-col justify-between space-y-4 transition-all hover:shadow-xl group relative overflow-hidden"
+                    >
+                      <div className="space-y-3">
+                        {/* Header */}
+                        <div className="flex items-center justify-between pb-3 border-b border-gray-800">
+                          <div>
+                            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider block">
+                              Combo Especial
+                            </span>
+                            <h4 className="text-sm font-bold text-white leading-tight mt-0.5">
+                              {combo.nombre}
+                            </h4>
+                          </div>
+
+                          {discountPct > 0 && (
+                            <span className="px-2 py-1 rounded-full bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-black tracking-wide">
+                              -{Math.round(discountPct)}% AHORRO
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Plataformas incluidas con desglose detallado */}
+                        <div className="space-y-2">
+                          <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider block">
+                            Servicios Incluidos en este Combo:
+                          </span>
+                          <div className="space-y-2">
+                            {combo.items?.map((item: any, idx: number) => {
+                              const planPrice = Number(item.plan?.precio || 0);
+                              const qty = item.cantidad || 1;
+                              const serviceName = item.plan?.service?.nombre || item.plan?.nombrePlan;
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className="bg-black/60 p-2.5 rounded-xl border border-gray-800/90 space-y-1 text-xs"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      {item.plan?.service?.logoUrl ? (
+                                        <img
+                                          src={item.plan.service.logoUrl}
+                                          alt=""
+                                          className="w-5 h-5 object-contain rounded bg-black/50 p-0.5 border border-gray-800"
+                                        />
+                                      ) : (
+                                        <span className="w-5 h-5 rounded bg-purple-950 text-purple-300 text-[10px] flex items-center justify-center font-bold">
+                                          ST
+                                        </span>
+                                      )}
+                                      <div>
+                                        <span className="font-bold text-white text-xs block leading-none">
+                                          {serviceName}
+                                        </span>
+                                        <span className="text-[10px] text-purple-300 font-medium">
+                                          {item.plan?.nombrePlan}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <span className="font-mono text-[11px] text-gray-400 font-semibold">
+                                      {qty > 1 ? `${qty}x ` : ''}{formatCOP(planPrice * qty)}
+                                    </span>
+                                  </div>
+
+                                  {/* Especificaciones técnicas de cada plataforma */}
+                                  <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-gray-850/80 text-[10px] text-gray-300">
+                                    <div className="flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                      <span>Resolución: <strong className="text-white">{item.plan?.resolucion || '4K UHD'}</strong></span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                      <span>Pantallas: <strong className="text-white">{item.plan?.pantallasSimultaneas || 1} Perfil</strong></span>
+                                    </div>
+                                    <div className="flex items-center gap-1 col-span-2 text-gray-400">
+                                      <ShieldCheck className="w-3 h-3 text-sky-400 shrink-0" />
+                                      <span>Vigencia y Garantía: <strong>{item.plan?.duracionDias || 30} días</strong> ({item.plan?.garantiaDias || 30}d reposición)</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Desglose Financiero y Ahorro Total */}
+                        <div className="pt-2 border-t border-gray-800 space-y-1">
+                          {regularTotal > Number(combo.precioCombo) && (
+                            <div className="flex items-center justify-between text-[11px] text-gray-400">
+                              <span>Precio por separado:</span>
+                              <span className="line-through font-mono">{formatCOP(regularTotal)}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white uppercase tracking-wider">Precio del Combo:</span>
+                            <span className="text-xl font-black text-emerald-400 font-mono">
+                              {formatCOP(combo.precioCombo)}
+                            </span>
+                          </div>
+                          {regularTotal > Number(combo.precioCombo) && (
+                            <div className="flex items-center justify-between text-[11px] text-emerald-400 bg-emerald-950/40 border border-emerald-800/40 px-2 py-1 rounded-lg">
+                              <span className="font-semibold">¡Ahorras en este paquete!</span>
+                              <strong className="font-mono">+{formatCOP(regularTotal - Number(combo.precioCombo))}</strong>
+                            </div>
+                          )}
+                          {combo.descripcion && (
+                            <p className="text-[11px] text-gray-400 pt-1 leading-relaxed">
+                              {combo.descripcion}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Botón de Compra por WhatsApp */}
+                      <a
+                        href={`https://wa.me/${(settings?.whatsappNumber || '573000000000').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                          `¡Hola! Estoy en la tienda del portal y deseo adquirir el combo promocional *${combo.nombre}* (${platformsNames}) por valor de ${formatCOP(combo.precioCombo)}.`
+                        )}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-950/40 transition-all flex items-center justify-center gap-2 cursor-pointer group-hover:scale-[1.02]"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        <span>Pedir Combo por WhatsApp ({formatCOP(combo.precioCombo)})</span>
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Grid de Planes Disponibles Individuales */}
+          {catalogCategory !== 'combos' && (
+            <div className="space-y-3 pt-2">
+              {combos.length > 0 && catalogCategory === 'all' && (
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Plataformas Individuales</span>
+                  <span className="text-xs text-gray-500 font-normal">({filteredAvailablePlans.length} planes)</span>
+                </h3>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {filteredAvailablePlans.map((plan) => {
+                  const service = services.find((s) => s.id === plan.serviceId);
 
               return (
                 <div
                   key={plan.id}
-                  className="bg-gray-900/70 border border-gray-800/90 hover:border-red-600/50 rounded-2xl p-5 backdrop-blur-md flex flex-col justify-between space-y-4 transition-all hover:shadow-xl group"
+                  className="bg-[#0b0f19] border border-gray-800 hover:border-red-600/50 rounded-2xl p-5 shadow-2xl flex flex-col justify-between space-y-4 transition-all hover:shadow-xl group"
                 >
                   <div className="space-y-3">
                     {/* Header */}
@@ -1497,7 +1701,9 @@ export default function ClientDashboardPage() {
                 </div>
               );
             })}
-          </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1506,7 +1712,7 @@ export default function ClientDashboardPage() {
       {/* ========================================================================= */}
       {activeTab === 'orders' && (
         <div className="space-y-4">
-          <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 backdrop-blur-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <FileText className="w-5 h-5 text-purple-400" />
@@ -1516,15 +1722,15 @@ export default function ClientDashboardPage() {
                 Consulta el ID de compra y el detalle completo de tus órdenes registradas para fácil control y soporte inmediato.
               </p>
             </div>
-            <div className="text-xs text-gray-400 font-medium bg-gray-950/70 border border-gray-800 px-3 py-1.5 rounded-xl self-start sm:self-auto">
+            <div className="text-xs text-gray-400 font-medium bg-[#030712] border border-gray-800 px-3 py-1.5 rounded-xl self-start sm:self-auto">
               Total Órdenes: <strong className="text-white">{orders.length}</strong>
             </div>
           </div>
 
-          <div className="bg-gray-900/60 border border-gray-800 rounded-2xl overflow-hidden backdrop-blur-md">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-gray-300">
-                <thead className="bg-gray-950/80 border-b border-gray-800 text-gray-400 uppercase tracking-wider font-semibold text-[10px]">
+                <thead className="bg-[#030712] border-b border-gray-800 text-gray-400 uppercase tracking-wider font-semibold text-[10px]">
                   <tr>
                     <th className="px-5 py-3.5">ID de la Compra</th>
                     <th className="px-5 py-3.5">Fecha y Hora</th>
@@ -1690,10 +1896,10 @@ export default function ClientDashboardPage() {
       {/* TAB 4: GARANTÍAS Y TICKETS */}
       {/* ========================================================================= */}
       {activeTab === 'tickets' && (
-        <div className="bg-gray-900/60 border border-gray-800 rounded-2xl overflow-hidden backdrop-blur-md">
+        <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-gray-300">
-              <thead className="bg-gray-950/80 border-b border-gray-800 text-gray-400 uppercase tracking-wider font-semibold text-[10px]">
+              <thead className="bg-[#030712] border-b border-gray-800 text-gray-400 uppercase tracking-wider font-semibold text-[10px]">
                 <tr>
                   <th className="px-5 py-3.5">Fecha Reporte</th>
                   <th className="px-5 py-3.5">Servicio</th>
@@ -1702,7 +1908,7 @@ export default function ClientDashboardPage() {
                   <th className="px-5 py-3.5 text-right">Estado Ticket</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-850/60">
+              <tbody className="divide-y divide-gray-850">
                 {tickets.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-5 py-12 text-center text-gray-500">
@@ -1711,7 +1917,7 @@ export default function ClientDashboardPage() {
                   </tr>
                 ) : (
                   paginatedTickets.map((t) => (
-                    <tr key={t.id} className="hover:bg-gray-850/40 transition-colors">
+                    <tr key={t.id} className="hover:bg-[#030712] transition-colors">
                       <td className="px-5 py-4 text-gray-400">
                         {new Date(t.fechaCreacion).toLocaleDateString()}
                       </td>
@@ -1721,7 +1927,7 @@ export default function ClientDashboardPage() {
                       <td className="px-5 py-4">
                         {t.orderId ? (
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-purple-300 font-bold bg-purple-950/70 border border-purple-800/50 px-2 py-0.5 rounded text-[11px]">
+                            <span className="font-mono text-purple-300 font-bold bg-purple-950 border border-purple-800 px-2 py-0.5 rounded text-[11px]">
                               #ORD-{t.orderId.substring(0, 8).toUpperCase()}
                             </span>
                             <button
@@ -1745,8 +1951,8 @@ export default function ClientDashboardPage() {
                         <span
                           className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
                             t.estado === 'resuelto'
-                              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60'
-                              : 'bg-blue-950/60 text-blue-400 border-blue-800/60'
+                              ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                              : 'bg-blue-950 text-blue-300 border-blue-800'
                           }`}
                         >
                           {t.estado === 'pendiente_revision' ? 'En Revisión (10 min)' : t.estado}
@@ -1771,7 +1977,7 @@ export default function ClientDashboardPage() {
       {/* TAB 5: AJUSTES DE PERFIL */}
       {/* ========================================================================= */}
       {activeTab === 'profile' && (
-        <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-6 backdrop-blur-md max-w-xl">
+        <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-6 shadow-2xl max-w-xl">
           <div className="border-b border-gray-800 pb-3 mb-4">
             <h3 className="text-base font-bold text-white">Mis Datos de Cliente</h3>
             <p className="text-xs text-gray-400">

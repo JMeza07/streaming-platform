@@ -4,6 +4,37 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import api from '@/lib/api';
 import { Tv } from 'lucide-react';
 
+export interface HeroConfig {
+  enabled: boolean;
+  images: string[];
+  transitionDuration: number; // segundos entre diapositivas
+  fadeSpeed: number; // velocidad de disolvencia en segundos
+  opacity: number; // 0.05 a 1.0 (opacidad de las imágenes de fondo)
+  overlayColor: string; // color hex o rgb de la capa frontal
+  overlayOpacity: number; // 0.0 a 1.0 (opacidad de la capa frontal)
+  enableParallax: boolean; // parallax interactivo con mouse/scroll
+  enableKenBurns: boolean; // animación continua de zoom y desplazamiento suave
+  overlayGradient: 'cinematic' | 'radial' | 'linear' | 'none';
+}
+
+export const DEFAULT_HERO_CONFIG: HeroConfig = {
+  enabled: true,
+  images: [
+    'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?q=80&w=2069&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=2025&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=2084&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=2070&auto=format&fit=crop',
+  ],
+  transitionDuration: 6,
+  fadeSpeed: 1.5,
+  opacity: 0.40,
+  overlayColor: '#030712',
+  overlayOpacity: 0.70,
+  enableParallax: true,
+  enableKenBurns: true,
+  overlayGradient: 'cinematic',
+};
+
 export interface SystemSettings {
   id?: string;
   nombrePlataforma: string;
@@ -15,12 +46,14 @@ export interface SystemSettings {
   mantenimiento: boolean;
   mensajeMantenimiento: string;
   mediosPago?: any[];
+  heroConfig?: HeroConfig;
   [key: string]: any;
 }
 
 interface SettingsContextValue {
   systemName: string;
   systemLogo: string | null;
+  heroConfig: HeroConfig;
   settings: SystemSettings | null;
   loading: boolean;
   refreshSettings: () => Promise<void>;
@@ -38,11 +71,13 @@ const defaultSettings: SystemSettings = {
   mantenimiento: false,
   mensajeMantenimiento: 'Estamos realizando mejoras programadas en el servidor.',
   mediosPago: [],
+  heroConfig: DEFAULT_HERO_CONFIG,
 };
 
 const SettingsContext = createContext<SettingsContextValue>({
   systemName: 'MezaStreaming',
   systemLogo: null,
+  heroConfig: DEFAULT_HERO_CONFIG,
   settings: defaultSettings,
   loading: true,
   refreshSettings: async () => {},
@@ -64,6 +99,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const systemName = settings.nombrePlataforma || 'MezaStreaming';
   const systemLogo = settings.logoUrl || null;
+  const heroConfig: HeroConfig = {
+    ...DEFAULT_HERO_CONFIG,
+    ...(settings.heroConfig || {}),
+    images:
+      Array.isArray(settings.heroConfig?.images) && settings.heroConfig.images.length > 0
+        ? settings.heroConfig.images
+        : DEFAULT_HERO_CONFIG.images,
+  };
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -73,6 +116,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           ...res.data,
           nombrePlataforma: res.data.nombrePlataforma || 'MezaStreaming',
           logoUrl: res.data.logoUrl || null,
+          heroConfig: {
+            ...DEFAULT_HERO_CONFIG,
+            ...(res.data.heroConfig || {}),
+            images:
+              Array.isArray(res.data.heroConfig?.images) && res.data.heroConfig.images.length > 0
+                ? res.data.heroConfig.images
+                : DEFAULT_HERO_CONFIG.images,
+          },
         });
       }
     } catch (err) {
@@ -91,6 +142,16 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           ...res.data,
           nombrePlataforma: res.data.nombrePlataforma || prev.nombrePlataforma,
           logoUrl: res.data.logoUrl !== undefined ? res.data.logoUrl : prev.logoUrl,
+          heroConfig: res.data.heroConfig
+            ? {
+                ...DEFAULT_HERO_CONFIG,
+                ...res.data.heroConfig,
+                images:
+                  Array.isArray(res.data.heroConfig.images) && res.data.heroConfig.images.length > 0
+                    ? res.data.heroConfig.images
+                    : DEFAULT_HERO_CONFIG.images,
+              }
+            : prev.heroConfig,
         }));
       }
     } catch (err) {
@@ -134,6 +195,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       value={{
         systemName,
         systemLogo,
+        heroConfig,
         settings,
         loading,
         refreshSettings,

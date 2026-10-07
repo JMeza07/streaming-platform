@@ -43,6 +43,16 @@ export class CustomersController {
     }, user);
   }
 
+  // SRS REQ. ADICIONAL 1 (PUNTO 23): Generador de promociones y mensajes contextuales de WhatsApp
+  @Get(':id/custom-promo-message')
+  @Roles(UserRole.ADMIN, UserRole.VENDEDOR, UserRole.ASESOR_COMERCIAL, UserRole.SOPORTE)
+  generateCustomPromoMessage(
+    @Param('id') id: string,
+    @Query('motivo') motivo?: any,
+  ) {
+    return this.customersService.generateCustomPromoMessage(id, motivo);
+  }
+
   // 2. PERFIL 360° DE UN CLIENTE (Admin, Vendedor y Asesor Comercial)
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.VENDEDOR, UserRole.ASESOR_COMERCIAL)

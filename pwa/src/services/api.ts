@@ -5,6 +5,7 @@
 
 const STORAGE_API_KEY = 'mezastream_api_url';
 const STORAGE_TOKEN_KEY = 'mezastream_token';
+const STORAGE_REFRESH_TOKEN_KEY = 'mezastream_refresh_token';
 const STORAGE_USER_KEY = 'mezastream_user';
 
 export const getDefaultApiUrl = (): string => {
@@ -54,6 +55,18 @@ export const setToken = (token: string | null) => {
   }
 };
 
+export const getRefreshToken = (): string | null => {
+  return localStorage.getItem(STORAGE_REFRESH_TOKEN_KEY);
+};
+
+export const setRefreshToken = (token: string | null) => {
+  if (token) {
+    localStorage.setItem(STORAGE_REFRESH_TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(STORAGE_REFRESH_TOKEN_KEY);
+  }
+};
+
 export const getStoredUser = (): any | null => {
   const data = localStorage.getItem(STORAGE_USER_KEY);
   if (!data) return null;
@@ -92,7 +105,9 @@ export const testServerConnection = async (targetUrl?: string): Promise<{ succes
   }
 };
 
-// Generic authenticated fetch wrapper
+let isRefreshingPwa = false;
+
+// Generic authenticated fetch wrapper with automatic token refresh (SRS RNF-S06)
 export async function apiRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const baseUrl = getApiUrl();
   const url = `${baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
@@ -114,8 +129,53 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestInit
   });
 
   if (response.status === 401) {
+    const isAuthEndpoint =
+      endpoint.includes('/auth/login') ||
+      endpoint.includes('/auth/register') ||
+      endpoint.includes('/auth/refresh') ||
+      endpoint.includes('/auth/2fa');
+
+    const refreshToken = getRefreshToken();
+
+    if (!isAuthEndpoint && refreshToken && !isRefreshingPwa) {
+      isRefreshingPwa = true;
+      try {
+        const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          const newAccessToken = refreshData.access_token || refreshData.accessToken || refreshData.token;
+          const newRefreshToken = refreshData.refreshToken || refreshData.refresh_token;
+
+          setToken(newAccessToken);
+          if (newRefreshToken) setRefreshToken(newRefreshToken);
+          if (refreshData.user) setStoredUser(refreshData.user);
+
+          isRefreshingPwa = false;
+
+          // Reintentar la solicitud original con el nuevo token
+          headers['Authorization'] = `Bearer ${newAccessToken}`;
+          const retryRes = await fetch(url, { ...options, headers });
+          const retryData = await retryRes.json().catch(() => null);
+          if (!retryRes.ok) {
+            throw new Error(retryData?.message || 'Error en la solicitud');
+          }
+          return retryData as T;
+        }
+      } catch (_) {
+        // Falló refresh -> continuar con deslogueo
+      } finally {
+        isRefreshingPwa = false;
+      }
+    }
+
     // Session expired or invalid
     setToken(null);
+    setRefreshToken(null);
     setStoredUser(null);
     window.dispatchEvent(new Event('auth:unauthorized'));
     throw new Error('Sesión expirada o no autorizada');

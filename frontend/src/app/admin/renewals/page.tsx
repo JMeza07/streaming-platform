@@ -268,7 +268,14 @@ export default function RenewalsPage() {
 
   // Manejo de Aprobación
   const initiateApprove = (order: RenewalOrder) => {
-    if (order.comprobanteUrl && !order.comprobanteVerificado && !verifiedReceiptOrders[order.id]) {
+    if (!order.comprobanteUrl || !order.comprobanteUrl.trim()) {
+      alert('Esta renovación no cuenta con un comprobante de pago adjunto. Es obligatorio que el cliente o asesor adjunte el comprobante para poder aprobar la renovación.', {
+        type: 'warning',
+        title: 'Comprobante Requerido',
+      });
+      return;
+    }
+    if (!order.comprobanteVerificado && !verifiedReceiptOrders[order.id]) {
       setUnverifiedWarningOrder(order);
       return;
     }

@@ -19,6 +19,8 @@ import { UsersModule } from './modules/users/users.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { ShiftsModule } from './modules/shifts/shifts.module';
+import { CombosModule } from './modules/combos/combos.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -50,6 +52,8 @@ import { APP_GUARD } from '@nestjs/core';
     UsersModule,
     SettingsModule,
     CustomersModule,
+    ShiftsModule,
+    CombosModule,
   ],
   providers: [
     {

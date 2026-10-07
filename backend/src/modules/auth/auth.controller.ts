@@ -74,6 +74,23 @@ export class AuthController {
     return this.authService.lookupEmail(body?.email);
   }
 
+  // RENOVAR TOKEN DE SESIÓN (REFRESH TOKEN ROTATIVO - SRS RNF-S06)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Post('refresh')
+  refreshToken(@Body() dto: { refreshToken: string }, @Req() req: any) {
+    const ip = req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || '';
+    const userAgent = req.headers?.['user-agent'] || '';
+    return this.authService.refreshToken(dto?.refreshToken, String(ip), String(userAgent));
+  }
+
+  // CERRAR SESIÓN Y REVOCAR TOKEN
+  @Post('logout')
+  logout(@Body() dto: { refreshToken?: string; userId?: string }, @Req() req: any) {
+    const ip = req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || '';
+    const userAgent = req.headers?.['user-agent'] || '';
+    return this.authService.logout(dto?.refreshToken, dto?.userId, String(ip), String(userAgent));
+  }
+
   // OBTENER DATOS DEL USUARIO AUTENTICADO (RUTA PROTEGIDA)
   @UseGuards(JwtAuthGuard)
   @Get('me')

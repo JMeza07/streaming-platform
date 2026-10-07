@@ -460,34 +460,68 @@ export default function AdminDashboardPage() {
 
         {/* Alertas del Negocio */}
         <div className="space-y-6">
-          <div className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-6 backdrop-blur-md space-y-4">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-6 shadow-xl space-y-4">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-400" />
               <span>Alertas del Negocio</span>
             </h2>
 
             <div className="space-y-3 text-xs">
-              <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-800/40 text-amber-200">
-                <p className="font-semibold flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Suscripciones por vencer (3 días)</span>
+              <div className="p-4 rounded-xl bg-[#030712] border border-amber-900/50 text-amber-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold flex items-center gap-1.5 text-amber-300">
+                    <Clock className="w-4 h-4 text-amber-400" />
+                    <span>Suscripciones por Vencer</span>
+                  </p>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800">
+                    CRM Alertas
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800/80 text-center">
+                  <div className="p-1.5 rounded-lg bg-[#0b0f19] border border-gray-800">
+                    <span className="text-[10px] text-gray-400 block">En ≤ 3 días</span>
+                    <span className="text-base font-black text-red-400 block">
+                      {alerts?.porVencerPronto ?? data?.subscriptions?.porVencer ?? 0}
+                    </span>
+                  </div>
+                  <div className="p-1.5 rounded-lg bg-[#0b0f19] border border-gray-800">
+                    <span className="text-[10px] text-gray-400 block">En ≤ 7 días</span>
+                    <span className="text-base font-black text-amber-400 block">
+                      {alerts?.porVencer7Dias ?? data?.subscriptions?.porVencer7Dias ?? 0}
+                    </span>
+                  </div>
+                  <div className="p-1.5 rounded-lg bg-[#0b0f19] border border-gray-800">
+                    <span className="text-[10px] text-gray-400 block">En 30 días</span>
+                    <span className="text-base font-black text-blue-400 block">
+                      {alerts?.porVencer30Dias ?? data?.subscriptions?.porVencer30Dias ?? 0}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-gray-400">
+                  Envía recordatorios personalizados de cobro y renovación vía WhatsApp en 1 clic.
                 </p>
-                <p className="text-lg font-black text-amber-400 mt-1">
-                  {data?.subscriptions?.porVencer || 0}
-                </p>
-                <p className="text-[11px] text-amber-300/70 mt-0.5">
-                  Los recordatorios automáticos de WhatsApp están listos para ser enviados.
-                </p>
+
+                <Link
+                  href="/admin/sales-accounts?tab=expiring"
+                  className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-950 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <span>Gestionar Próximos a Vencer (WhatsApp)</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-gray-950/60 border border-gray-800 text-gray-300">
-                <p className="font-semibold text-white">Tickets de Garantía Pendientes</p>
-                <p className="text-lg font-black text-red-400 mt-1">
-                  {alerts?.ticketsGarantiaPendientes || 0}
-                </p>
+              <div className="p-4 rounded-xl bg-[#030712] border border-gray-800 text-gray-300 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-white">Tickets de Garantía Pendientes</p>
+                  <span className="text-lg font-black text-red-400">
+                    {alerts?.ticketsGarantiaPendientes ?? 0}
+                  </span>
+                </div>
                 <Link
                   href="/admin/warranty"
-                  className="inline-flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300 font-medium mt-1"
+                  className="inline-flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300 font-medium"
                 >
                   <span>Revisar tickets de soporte</span>
                   <ArrowUpRight className="w-3 h-3" />

@@ -59,11 +59,21 @@ export default function InventoryPage() {
 
   const isAdmin = currentUser?.rol === 'ADMIN';
 
-  // Pestañas: 'accounts' | 'root_accounts' | 'providers'
-  const [activeTab, setActiveTab] = useState<'accounts' | 'root_accounts' | 'providers'>('accounts');
+  // Pestañas: 'accounts' | 'root_accounts'
+  const [activeTab, setActiveTab] = useState<'accounts' | 'root_accounts'>('accounts');
   const [rootAccounts, setRootAccounts] = useState<any[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
+
+  // Helper para cálculo automático de fecha según días
+  const calculateExpirationDate = (days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + Number(days));
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
 
   // Modales
   const [showAddModal, setShowAddModal] = useState(false);
@@ -71,8 +81,9 @@ export default function InventoryPage() {
   const [editingAccount, setEditingAccount] = useState<any | null>(null);
   const [accountToDelete, setAccountToDelete] = useState<any | null>(null);
 
-  // Modales Cuentas Raíz & Proveedores
+  // Modales Cuentas Raíz
   const [showAddRootModal, setShowAddRootModal] = useState(false);
+  const [rootDurationDays, setRootDurationDays] = useState<number>(30);
   const [newRootAccount, setNewRootAccount] = useState({
     email: '',
     password: '',
@@ -81,7 +92,7 @@ export default function InventoryPage() {
     planId: '',
     tipoVenta: 'POR_PANTALLA' as 'POR_PANTALLA' | 'COMPLETA',
     generateProfiles: true,
-    fechaVencimientoRaiz: '',
+    fechaVencimientoRaiz: calculateExpirationDate(30),
     costoCompra: '',
     maxPantallas: 5,
   });
@@ -245,6 +256,7 @@ export default function InventoryPage() {
         generateProfiles: newRootAccount.generateProfiles,
       });
       setShowAddRootModal(false);
+      setRootDurationDays(30);
       setNewRootAccount({
         email: '',
         password: '',
@@ -253,7 +265,7 @@ export default function InventoryPage() {
         planId: '',
         tipoVenta: 'POR_PANTALLA',
         generateProfiles: true,
-        fechaVencimientoRaiz: '',
+        fechaVencimientoRaiz: calculateExpirationDate(30),
         costoCompra: '',
         maxPantallas: 5,
       });
@@ -655,18 +667,6 @@ export default function InventoryPage() {
         >
           <Layers className="w-4 h-4" />
           <span>Cuentas Raíz ({rootAccounts.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('providers')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === 'providers'
-              ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20'
-              : 'bg-gray-900/60 text-gray-400 hover:text-white border border-gray-800'
-          }`}
-        >
-          <Building2 className="w-4 h-4" />
-          <span>Proveedores ({providers.length})</span>
         </button>
       </div>
 
@@ -1087,71 +1087,6 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* PESTAÑA 3: PROVEEDORES */}
-      {activeTab === 'providers' && (
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 backdrop-blur-md">
-            <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-amber-400" />
-                <span>Directorio de Proveedores Mayoristas</span>
-              </h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Control de proveedores y gestión de caídas masivas en cascada (Escenario 9).
-              </p>
-            </div>
-            {isAdmin && (
-              <button
-                onClick={() => setShowAddProviderModal(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-xs font-semibold text-white rounded-xl shadow-lg shadow-amber-600/20 transition-all cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Nuevo Proveedor</span>
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {providers.length === 0 ? (
-              <div className="col-span-full py-8 text-center text-gray-500 bg-gray-900/40 rounded-2xl border border-gray-800/80">
-                No hay proveedores registrados aún.
-              </div>
-            ) : (
-              providers.map((p) => (
-                <div key={p.id} className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-white text-sm">{p.nombre || p.name}</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      (p.estado || p.status) === 'ACTIVO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                    }`}>
-                      {p.estado || p.status}
-                    </span>
-                  </div>
-
-                  <div className="text-xs text-gray-300 space-y-1">
-                    {(p.telefono || p.contactPhone) && <div><span className="text-gray-500">Tel / WA:</span> {p.telefono || p.contactPhone}</div>}
-                    {(p.email || p.contactEmail) && <div><span className="text-gray-500">Email:</span> {p.email || p.contactEmail}</div>}
-                    {(p.notas || p.notes) && <div className="text-[11px] text-gray-400 italic mt-1">{p.notas || p.notes}</div>}
-                  </div>
-
-                  <div className="pt-2 border-t border-gray-800/80 flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Cuentas vinculadas: <strong className="text-white">{p.rootAccounts?.length || p._count?.rootAccounts || 0}</strong></span>
-                    {(p.estado || p.status) === 'ACTIVO' && (
-                      <button
-                        onClick={() => handleMarkProviderDown(p)}
-                        className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-600/40 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1"
-                      >
-                        <AlertTriangle className="w-3 h-3" />
-                        <span>Caída Masiva</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
 
       {/* MODAL: ROTAR CONTRASEÑA RAÍZ (Escenarios 3 y 5) */}
       {rotatingAccount && (
@@ -1278,30 +1213,94 @@ export default function InventoryPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-gray-400 font-semibold mb-1">Vencimiento Raíz</label>
-                  <input
-                    type="date"
-                    required
-                    value={newRootAccount.fechaVencimientoRaiz}
-                    onChange={(e) => setNewRootAccount({ ...newRootAccount, fechaVencimientoRaiz: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                  />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-gray-400 font-semibold">Duración de la Cuenta</label>
+                  <span className="text-xs text-indigo-400 font-mono font-bold bg-indigo-950/60 px-2.5 py-0.5 rounded-lg border border-indigo-500/30">
+                    📅 Vence el: {newRootAccount.fechaVencimientoRaiz || calculateExpirationDate(rootDurationDays)}
+                  </span>
                 </div>
 
-                <div>
-                  <label className="block text-gray-400 font-semibold mb-1">Pantallas Máximas</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    required
-                    value={newRootAccount.maxPantallas}
-                    onChange={(e) => setNewRootAccount({ ...newRootAccount, maxPantallas: parseInt(e.target.value) || 5 })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                  />
+                {/* Chips de selección rápida de días */}
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[
+                    { label: '30 Días', days: 30, desc: '1 mes' },
+                    { label: '60 Días', days: 60, desc: '2 meses' },
+                    { label: '90 Días', days: 90, desc: '3 meses' },
+                    { label: '180 Días', days: 180, desc: '6 meses' },
+                    { label: '360 Días', days: 360, desc: '1 año' },
+                  ].map((preset) => {
+                    const isSelected = rootDurationDays === preset.days;
+                    return (
+                      <button
+                        key={preset.days}
+                        type="button"
+                        onClick={() => {
+                          setRootDurationDays(preset.days);
+                          setNewRootAccount({
+                            ...newRootAccount,
+                            fechaVencimientoRaiz: calculateExpirationDate(preset.days),
+                          });
+                        }}
+                        className={`px-2 py-1.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                          isSelected
+                            ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/30 scale-[1.02]'
+                            : 'bg-gray-950 border-gray-800 text-gray-400 hover:text-white hover:border-gray-700'
+                        }`}
+                      >
+                        <span className="font-bold text-[11px] leading-tight">{preset.label}</span>
+                        <span className={`text-[9px] ${isSelected ? 'text-indigo-200' : 'text-gray-500'}`}>{preset.desc}</span>
+                      </button>
+                    );
+                  })}
                 </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-gray-500 text-[11px] font-medium mb-1">Días personalizados</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Ej. 45"
+                      value={rootDurationDays || ''}
+                      onChange={(e) => {
+                        const days = parseInt(e.target.value) || 0;
+                        setRootDurationDays(days);
+                        if (days > 0) {
+                          setNewRootAccount({
+                            ...newRootAccount,
+                            fechaVencimientoRaiz: calculateExpirationDate(days),
+                          });
+                        }
+                      }}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-500 text-[11px] font-medium mb-1">Fecha de Vencimiento calculada</label>
+                    <input
+                      type="date"
+                      required
+                      value={newRootAccount.fechaVencimientoRaiz}
+                      onChange={(e) => setNewRootAccount({ ...newRootAccount, fechaVencimientoRaiz: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-semibold mb-1">Pantallas Máximas</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  required
+                  value={newRootAccount.maxPantallas}
+                  onChange={(e) => setNewRootAccount({ ...newRootAccount, maxPantallas: parseInt(e.target.value) || 5 })}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                />
               </div>
 
               <div>
@@ -1537,87 +1536,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* MODAL: NUEVO PROVEEDOR (Escenario 9) */}
-      {showAddProviderModal && (
-        <div className="fixed inset-0 z-[10010] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-gray-900 border border-gray-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
-            <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0 bg-gray-900/95">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-amber-400" />
-                <span>Registrar Nuevo Proveedor</span>
-              </h3>
-              <button onClick={() => setShowAddProviderModal(false)} className="text-gray-400 hover:text-white cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <form onSubmit={handleCreateProvider} className="p-5 space-y-3.5 text-xs">
-              <div>
-                <label className="block text-gray-400 font-semibold mb-1">Nombre Comercial</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: StreamingGlobal S.A."
-                  value={newProvider.name}
-                  onChange={(e) => setNewProvider({ ...newProvider, name: e.target.value })}
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 font-semibold mb-1">WhatsApp / Teléfono de Contacto</label>
-                <input
-                  type="text"
-                  placeholder="+57 300 000 0000"
-                  value={newProvider.contactPhone}
-                  onChange={(e) => setNewProvider({ ...newProvider, contactPhone: e.target.value })}
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 font-semibold mb-1">Correo Electrónico</label>
-                <input
-                  type="email"
-                  placeholder="soporte@proveedor.com"
-                  value={newProvider.contactEmail}
-                  onChange={(e) => setNewProvider({ ...newProvider, contactEmail: e.target.value })}
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 font-semibold mb-1">Notas / Políticas de Garantía</label>
-                <textarea
-                  rows={2}
-                  placeholder="Notas adicionales..."
-                  value={newProvider.notes}
-                  onChange={(e) => setNewProvider({ ...newProvider, notes: e.target.value })}
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-amber-600 resize-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddProviderModal(false)}
-                  className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={formLoading}
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>Guardar Proveedor</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* MODAL: AGREGAR CUENTA */}
       {showAddModal && (

@@ -29,5 +29,9 @@ export class CreatePlanDto {
 
   @IsOptional()
   @IsBoolean()
+  usaPin?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   activo?: boolean;
 }

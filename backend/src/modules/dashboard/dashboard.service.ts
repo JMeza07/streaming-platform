@@ -109,6 +109,12 @@ export class DashboardService {
     const en3Dias = new Date(hoy);
     en3Dias.setDate(en3Dias.getDate() + 3);
 
+    const en7Dias = new Date(hoy);
+    en7Dias.setDate(en7Dias.getDate() + 7);
+
+    const en30Dias = new Date(hoy);
+    en30Dias.setDate(en30Dias.getDate() + 30);
+
     const activas = await this.prisma.subscription.count({
       where: {
         estado: SubscriptionStatus.ACTIVA,
@@ -120,6 +126,22 @@ export class DashboardService {
       where: {
         estado: SubscriptionStatus.ACTIVA,
         fechaVencimiento: { gte: hoy, lte: en3Dias },
+        ...sellerSubFilter,
+      },
+    });
+
+    const porVencer7Dias = await this.prisma.subscription.count({
+      where: {
+        estado: SubscriptionStatus.ACTIVA,
+        fechaVencimiento: { gte: hoy, lte: en7Dias },
+        ...sellerSubFilter,
+      },
+    });
+
+    const porVencer30Dias = await this.prisma.subscription.count({
+      where: {
+        estado: SubscriptionStatus.ACTIVA,
+        fechaVencimiento: { gte: hoy, lte: en30Dias },
         ...sellerSubFilter,
       },
     });
@@ -142,6 +164,8 @@ export class DashboardService {
     return {
       activas,
       porVencer,
+      porVencer7Dias,
+      porVencer30Dias,
       vencidas,
       enGarantia,
     };
@@ -198,11 +222,33 @@ export class DashboardService {
     const en3Dias = new Date(hoy);
     en3Dias.setDate(en3Dias.getDate() + 3);
 
-    // 1. Cuentas por vencer en 3 días
+    const en7Dias = new Date(hoy);
+    en7Dias.setDate(en7Dias.getDate() + 7);
+
+    const en30Dias = new Date(hoy);
+    en30Dias.setDate(en30Dias.getDate() + 30);
+
+    // 1. Cuentas por vencer en 3, 7 y 30 días
     const porVencerPronto = await this.prisma.subscription.count({
       where: {
         estado: SubscriptionStatus.ACTIVA,
         fechaVencimiento: { gte: hoy, lte: en3Dias },
+        ...sellerSubFilter,
+      },
+    });
+
+    const porVencer7Dias = await this.prisma.subscription.count({
+      where: {
+        estado: SubscriptionStatus.ACTIVA,
+        fechaVencimiento: { gte: hoy, lte: en7Dias },
+        ...sellerSubFilter,
+      },
+    });
+
+    const porVencer30Dias = await this.prisma.subscription.count({
+      where: {
+        estado: SubscriptionStatus.ACTIVA,
+        fechaVencimiento: { gte: hoy, lte: en30Dias },
         ...sellerSubFilter,
       },
     });
@@ -261,6 +307,8 @@ export class DashboardService {
 
     return {
       porVencerPronto,
+      porVencer7Dias,
+      porVencer30Dias,
       ordenesPendientes,
       ticketsAbiertos,
       lotesProblematicos,

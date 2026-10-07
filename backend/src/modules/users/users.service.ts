@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AuditService } from '../audit/audit.service';
+import { toTitleCase, normalizeE164 } from '../../common/utils/formatters.util';
 
 export const ALL_SYSTEM_MODULES = [
   '/admin/dashboard',
@@ -57,9 +58,9 @@ export class UsersService {
 
     const user = await this.prisma.user.create({
       data: {
-        nombre: dto.nombre.trim(),
+        nombre: toTitleCase(dto.nombre),
         email,
-        phone: dto.phone?.trim() || null,
+        phone: dto.phone ? normalizeE164(dto.phone) : null,
         rol: dto.rol,
         passwordHash,
         activo: dto.activo !== undefined ? dto.activo : true,
@@ -123,7 +124,9 @@ export class UsersService {
   // LISTAR USUARIOS INTERNOS (CRUD - R)
   // ==========================================
   async findAll(rol?: UserRole, includeClients: boolean = false) {
-    let whereClause: any = {};
+    let whereClause: any = {
+      deletedAt: null,
+    };
 
     if (rol) {
       if (rol === UserRole.CLIENTE && !includeClients) {
@@ -148,6 +151,7 @@ export class UsersService {
         rol: true,
         activo: true,
         modulosPermitidos: true,
+        lastActivityAt: true,
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -167,8 +171,8 @@ export class UsersService {
   // OBTENER DETALLE DE USUARIO (CRUD - R)
   // ==========================================
   async findOne(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
+    const user = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         nombre: true,
@@ -177,6 +181,7 @@ export class UsersService {
         rol: true,
         activo: true,
         modulosPermitidos: true,
+        lastActivityAt: true,
         createdAt: true,
         updatedAt: true,
         affiliate: {
@@ -203,7 +208,7 @@ export class UsersService {
   // ACTUALIZAR USUARIO INTERNO (CRUD - U)
   // ==========================================
   async updateUser(id: string, dto: UpdateUserDto, currentUserId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findFirst({ where: { id, deletedAt: null } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
     // No permitir asignar rol CLIENTE desde este módulo
@@ -216,8 +221,8 @@ export class UsersService {
     // Validar colisión de correo
     if (dto.email) {
       const email = dto.email.toLowerCase().trim();
-      if (email !== user.email.toLowerCase()) {
-        const collision = await this.prisma.user.findUnique({ where: { email } });
+      if (email !== user.email?.toLowerCase()) {
+        const collision = await this.prisma.user.findFirst({ where: { email, deletedAt: null } });
         if (collision && collision.id !== id) {
           throw new BadRequestException('Ya existe otro usuario registrado con este correo electrónico.');
         }
@@ -233,6 +238,7 @@ export class UsersService {
         where: {
           rol: UserRole.ADMIN,
           activo: true,
+          deletedAt: null,
           id: { not: id },
         },
       });
@@ -251,12 +257,21 @@ export class UsersService {
       passwordHash = await bcrypt.hash(dto.password.trim(), 10);
     }
 
+    const previousData = {
+      nombre: user.nombre,
+      email: user.email,
+      phone: user.phone,
+      rol: user.rol,
+      activo: user.activo,
+      modulosPermitidos: user.modulosPermitidos,
+    };
+
     const updated = await this.prisma.user.update({
       where: { id },
       data: {
-        ...(dto.nombre && { nombre: dto.nombre.trim() }),
+        ...(dto.nombre && { nombre: toTitleCase(dto.nombre) }),
         ...(dto.email && { email: dto.email.toLowerCase().trim() }),
-        ...(dto.phone !== undefined && { phone: dto.phone?.trim() || null }),
+        ...(dto.phone !== undefined && { phone: dto.phone ? normalizeE164(dto.phone) : null }),
         ...(dto.rol && { rol: dto.rol }),
         ...(dto.activo !== undefined && { activo: dto.activo }),
         ...(dto.modulosPermitidos !== undefined && { modulosPermitidos: dto.modulosPermitidos }),
@@ -299,6 +314,15 @@ export class UsersService {
       descripcion: `Usuario interno "${updated.nombre}" (${updated.email}, ${updated.rol}) actualizado`,
       entidadTipo: 'User',
       entidadId: updated.id,
+      valoresAnteriores: previousData,
+      valoresNuevos: {
+        nombre: updated.nombre,
+        email: updated.email,
+        phone: updated.phone,
+        rol: updated.rol,
+        activo: updated.activo,
+        modulosPermitidos: updated.modulosPermitidos,
+      },
       detalles: {
         userId: updated.id,
         nombre: updated.nombre,
@@ -316,7 +340,7 @@ export class UsersService {
   // ACTIVAR O DESACTIVAR MÓDULOS DE UN USUARIO (EXCLUSIVO ADMINISTRADOR)
   // ==========================================
   async updateUserModules(id: string, modulosPermitidos: string[], currentUserId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findFirst({ where: { id, deletedAt: null } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
     const updated = await this.prisma.user.update({
@@ -360,7 +384,7 @@ export class UsersService {
   // ALTERNAR ESTADO ACTIVO / SUSPENDIDO
   // ==========================================
   async toggleActive(id: string, currentUserId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findFirst({ where: { id, deletedAt: null } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
     if (currentUserId && id === currentUserId) {
@@ -370,7 +394,7 @@ export class UsersService {
     // Prevenir auto-bloqueo del Administrador principal si es el único
     if (user.rol === UserRole.ADMIN && user.activo) {
       const adminsCount = await this.prisma.user.count({
-        where: { rol: UserRole.ADMIN, activo: true, id: { not: id } },
+        where: { rol: UserRole.ADMIN, activo: true, deletedAt: null, id: { not: id } },
       });
       if (adminsCount < 1) {
         throw new BadRequestException('No puedes suspender al único administrador activo del sistema.');
@@ -395,11 +419,11 @@ export class UsersService {
   }
 
   // ==========================================
-  // ELIMINAR USUARIO INTERNO (CRUD - D)
+  // ELIMINAR USUARIO INTERNO (BORRADO LÓGICO - SRS RESTRICCIÓN 2.3)
   // ==========================================
   async deleteUser(id: string, currentUserId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('Usuario no encontrado');
+    const user = await this.prisma.user.findFirst({ where: { id, deletedAt: null } });
+    if (!user) throw new NotFoundException('Usuario no encontrado o ya dado de baja');
 
     if (currentUserId && id === currentUserId) {
       throw new BadRequestException('No puedes eliminar tu propia cuenta en sesión.');
@@ -407,42 +431,63 @@ export class UsersService {
 
     if (user.rol === UserRole.ADMIN) {
       const otherAdmins = await this.prisma.user.count({
-        where: { rol: UserRole.ADMIN, id: { not: id } },
+        where: { rol: UserRole.ADMIN, activo: true, deletedAt: null, id: { not: id } },
       });
       if (otherAdmins < 1) {
         throw new BadRequestException('No puedes eliminar al único administrador del sistema.');
       }
     }
 
-    // Verificar si tiene ventas realizadas (clave foránea en órdenes)
-    const salesCount = await this.prisma.order.count({
-      where: { vendedorId: id },
+    const previousData = {
+      id: user.id,
+      nombre: user.nombre,
+      email: user.email,
+      rol: user.rol,
+      activo: user.activo,
+    };
+
+    // Borrado lógico estricto (SRS Restricción 2.3)
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Marcar usuario como eliminado lógicamente y desactivado
+      await tx.user.update({
+        where: { id },
+        data: {
+          activo: false,
+          deletedAt: new Date(),
+        },
+      });
+
+      // 2. Revocar todas sus sesiones y refresh tokens
+      await tx.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
 
-    if (salesCount > 0) {
-      // Para no romper la integridad de auditoría y contabilidad, suspendemos al usuario
-      await this.prisma.user.update({
-        where: { id },
-        data: { activo: false },
-      });
-      return {
-        success: true,
-        action: 'suspended',
-        message: `El usuario tiene ${salesCount} venta(s) asociadas en el sistema. Por seguridad contable, su cuenta fue suspendida en lugar de borrarse físicamente.`,
+    // Auditoría inmutable
+    await this.auditService.registrarEvento({
+      usuarioId: currentUserId,
+      modulo: AuditCategory.USUARIOS,
+      accion: 'BAJA_LOGICA_USUARIO',
+      severidad: AuditSeverity.CRITICAL,
+      descripcion: `Usuario interno "${user.nombre}" (${user.email}, ${user.rol}) dado de baja lógicamente del sistema. Registros y autorías preservadas.`,
+      entidadTipo: 'User',
+      entidadId: id,
+      valoresAnteriores: previousData,
+      valoresNuevos: { activo: false, deletedAt: new Date().toISOString() },
+      detalles: {
         userId: id,
-      };
-    }
-
-    // Eliminar relaciones accesorias si existen (afiliado)
-    await this.prisma.affiliate.deleteMany({ where: { userId: id } });
-
-    // Eliminar usuario
-    await this.prisma.user.delete({ where: { id } });
+        nombre: user.nombre,
+        email: user.email,
+        rol: user.rol,
+      },
+      exito: true,
+    });
 
     return {
       success: true,
-      action: 'deleted',
-      message: 'Usuario eliminado permanentemente del sistema.',
+      action: 'soft_deleted',
+      message: `Usuario ${user.nombre} dado de baja lógicamente. Todos los accesos fueron revocados y la trazabilidad histórica fue preservada.`,
       userId: id,
     };
   }

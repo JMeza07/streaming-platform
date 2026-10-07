@@ -36,7 +36,7 @@ export class PortalService {
         plan: {
           include: {
             service: {
-              select: { nombre: true, logoUrl: true }
+              select: { nombre: true, logoUrl: true, usaPin: true }
             }
           }
         },
@@ -105,14 +105,22 @@ export class PortalService {
         emailCuenta: sub.account?.emailCuenta,
         passwordCuenta: sub.account?.passwordCuenta,
         perfilAsignado: sub.account?.perfilAsignado,
-        pinPerfil: sub.account?.assignedPin || sub.account?.pinPerfil,
-        assignedPin: sub.account?.assignedPin || sub.account?.pinPerfil,
+        usaPin: sub.plan.usaPin ?? sub.plan.service.usaPin ?? true,
+        pinPerfil: (sub.plan.usaPin ?? sub.plan.service.usaPin ?? true)
+          ? sub.account?.assignedPin || sub.account?.pinPerfil
+          : null,
+        assignedPin: (sub.plan.usaPin ?? sub.plan.service.usaPin ?? true)
+          ? sub.account?.assignedPin || sub.account?.pinPerfil
+          : null,
         // Solo mostrar credenciales si está activa
         credenciales: sub.estado === SubscriptionStatus.ACTIVA ? {
-          email: sub.account.emailCuenta,
-          password: sub.account.passwordCuenta,
-          perfil: sub.account.perfilAsignado,
-          pin: sub.account.assignedPin || sub.account.pinPerfil,
+          email: sub.account?.emailCuenta,
+          password: sub.account?.passwordCuenta,
+          perfil: sub.account?.perfilAsignado,
+          pin: (sub.plan.usaPin ?? sub.plan.service.usaPin ?? true)
+            ? sub.account?.assignedPin || sub.account?.pinPerfil
+            : null,
+          usaPin: sub.plan.usaPin ?? sub.plan.service.usaPin ?? true,
         } : null,
       };
     });
@@ -163,45 +171,49 @@ export class PortalService {
       }
     }
 
-    return {
-      id: subscription.id,
-      orderId: subscription.orderId,
-      order: subscription.order ? {
-        id: subscription.order.id,
-        referenciaExterna: subscription.order.referenciaExterna,
-        metodoPago: subscription.order.metodoPago,
-        total: subscription.order.total,
-        estado: subscription.order.estado,
-        vendedorNombre: subscription.order.vendedorNombre,
-        descripcionVenta: subscription.order.descripcionVenta,
-        comprobanteUrl: subscription.order.comprobanteUrl,
-        createdAt: subscription.order.createdAt,
-      } : null,
-      servicio: subscription.plan.service.nombre,
-      logoUrl: subscription.plan.service.logoUrl,
-      plan: subscription.plan.nombrePlan,
-      garantiaDias: subscription.plan.garantiaDias,
-      resolucion: subscription.plan.resolucion,
-      pantallas: subscription.plan.pantallasSimultaneas,
-      fechaInicio: subscription.fechaInicio,
-      fechaVencimiento: subscription.fechaVencimiento,
-      diasRestantes,
-      estado: subscription.estado,
-      autoRenovar: subscription.autoRenovar,
-      credencialesVistas: true,
-      credenciales: {
-        email: subscription.account.emailCuenta,
-        password: subscription.account.passwordCuenta,
-        perfil: subscription.account.perfilAsignado,
-        pin: subscription.account.assignedPin || subscription.account.pinPerfil,
-      },
-      reglasUso: [
-        'No cambiar la contraseña ni el correo',
-        'No crear ni modificar el PIN del perfil sin autorización',
-        'Usar solo en el país registrado',
-        'Reportar errores inmediatamente'
-      ]
-    };
+      const usaPin = subscription.plan.usaPin ?? subscription.plan.service.usaPin ?? true;
+
+      return {
+        id: subscription.id,
+        orderId: subscription.orderId,
+        order: subscription.order ? {
+          id: subscription.order.id,
+          referenciaExterna: subscription.order.referenciaExterna,
+          metodoPago: subscription.order.metodoPago,
+          total: subscription.order.total,
+          estado: subscription.order.estado,
+          vendedorNombre: subscription.order.vendedorNombre,
+          descripcionVenta: subscription.order.descripcionVenta,
+          comprobanteUrl: subscription.order.comprobanteUrl,
+          createdAt: subscription.order.createdAt,
+        } : null,
+        servicio: subscription.plan.service.nombre,
+        logoUrl: subscription.plan.service.logoUrl,
+        plan: subscription.plan.nombrePlan,
+        garantiaDias: subscription.plan.garantiaDias,
+        resolucion: subscription.plan.resolucion,
+        pantallas: subscription.plan.pantallasSimultaneas,
+        fechaInicio: subscription.fechaInicio,
+        fechaVencimiento: subscription.fechaVencimiento,
+        diasRestantes,
+        estado: subscription.estado,
+        autoRenovar: subscription.autoRenovar,
+        credencialesVistas: true,
+        usaPin,
+        credenciales: {
+          email: subscription.account.emailCuenta,
+          password: subscription.account.passwordCuenta,
+          perfil: subscription.account.perfilAsignado,
+          pin: usaPin ? (subscription.account.assignedPin || subscription.account.pinPerfil) : null,
+          usaPin,
+        },
+        reglasUso: [
+          'No cambiar la contraseña ni el correo',
+          ...(usaPin ? ['No crear ni modificar el PIN del perfil sin autorización'] : []),
+          'Usar solo en el país registrado',
+          'Reportar errores inmediatamente'
+        ]
+      };
   }
 
   // HISTORIAL DE COMPRAS (Órdenes de Venta)
@@ -439,12 +451,24 @@ const subscription = await this.prisma.subscription.findFirst({
       ? `${dto.motivoReporte} | ${dto.descripcionAdicional.trim()}`
       : dto.motivoReporte;
 
-    // 4. Crear ticket de soporte
+    // Verificación de coincidencia de contraseña reportada (SRS SGVS RF-020, RF-021)
+    const claveAlMomento = subscription.account?.passwordCuenta || null;
+    let coincideClave: boolean | null = null;
+    if (dto.claveReportada && claveAlMomento) {
+      coincideClave = dto.claveReportada.trim() === claveAlMomento.trim();
+    }
+
+    // 4. Crear ticket de soporte con trazabilidad SGVS
     const ticket = await this.prisma.supportTicket.create({
       data: {
         subscriptionId: dto.subscriptionId,
         customerId: customerId,
         motivoReporte: motivoConDetalle,
+        tipoError: dto.tipoError || dto.motivoReporte,
+        claveReportada: dto.claveReportada || null,
+        claveAlMomento: claveAlMomento,
+        coincideClave: coincideClave,
+        providerId: subscription.account?.providerId || null,
         evidenciaUrl: dto.evidenciaUrl,
         estado: 'pendiente_revision',
       },
@@ -467,7 +491,10 @@ const subscription = await this.prisma.subscription.findFirst({
     return {
       message: 'Ticket de garantía creado exitosamente',
       ticketId: ticket.id,
-      mensajeCliente: `Hemos recibido tu reporte. Nuestro equipo lo validará en los próximos 10 minutos. Te enviaremos la nueva cuenta por WhatsApp.`,
+      coincideClave,
+      mensajeCliente: coincideClave === false
+        ? `Hemos recibido tu reporte. Nota: La clave reportada difiere de la clave original entregada. Nuestro equipo validará el caso en los próximos minutos.`
+        : `Hemos recibido tu reporte. Nuestro equipo lo validará en los próximos 10 minutos. Te enviaremos la nueva cuenta por WhatsApp.`,
       estadoTicket: ticket.estado
     };
   }

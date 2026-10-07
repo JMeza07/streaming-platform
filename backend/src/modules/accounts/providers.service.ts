@@ -516,4 +516,144 @@ export class ProvidersService {
       reactivadas,
     };
   }
+
+  // =========================================================================
+  // SRS REQ. ADICIONAL 9 (PUNTO 26): AUTOCOMPLETADO DE PROVEEDORES
+  // =========================================================================
+  async getAutocomplete() {
+    const providers = await this.prisma.provider.findMany({
+      where: { estado: 'ACTIVO' },
+      select: {
+        id: true,
+        nombre: true,
+        contacto: true,
+        telefono: true,
+        tasaFallo: true,
+        estado: true,
+      },
+      orderBy: { nombre: 'asc' },
+    });
+
+    return providers.map((p) => ({
+      id: p.id,
+      nombre: p.nombre,
+      contacto: p.contacto,
+      telefono: p.telefono,
+      tasaFallo: Number(p.tasaFallo || 0),
+      label: `${p.nombre}${p.contacto ? ` (${p.contacto})` : ''}`,
+    }));
+  }
+
+  // =========================================================================
+  // SRS RF-024 (PUNTO 17): PRECIOS DE PROVEEDOR POR PLATAFORMA
+  // =========================================================================
+  async getPrices(providerId?: string, serviceId?: string) {
+    const where: any = { activo: true };
+    if (providerId) where.providerId = providerId;
+    if (serviceId) where.serviceId = serviceId;
+
+    return this.prisma.providerPrice.findMany({
+      where,
+      include: {
+        provider: { select: { id: true, nombre: true, estado: true, tasaFallo: true } },
+        service: { select: { id: true, nombre: true, logoUrl: true } },
+        plan: { select: { id: true, nombrePlan: true, precio: true } },
+      },
+      orderBy: [{ service: { nombre: 'asc' } }, { precio: 'asc' }],
+    });
+  }
+
+  async savePrice(data: {
+    providerId: string;
+    serviceId?: string;
+    planId?: string;
+    precio: number;
+    duracionDias?: number;
+    moneda?: string;
+    notas?: string;
+  }) {
+    if (!data.providerId || !data.precio) {
+      throw new BadRequestException('El ID del proveedor y el precio son obligatorios.');
+    }
+
+    // Si no se proporciona serviceId pero sí planId, buscar el serviceId del plan
+    let serviceId = data.serviceId;
+    if (!serviceId && data.planId) {
+      const plan = await this.prisma.plan.findUnique({ where: { id: data.planId } });
+      if (plan) serviceId = plan.serviceId;
+    }
+
+    return this.prisma.providerPrice.create({
+      data: {
+        providerId: data.providerId,
+        serviceId: serviceId || null,
+        planId: data.planId || null,
+        precio: data.precio,
+        duracionDias: data.duracionDias || 30,
+        moneda: data.moneda || 'COP',
+        notas: data.notas || null,
+      },
+      include: {
+        provider: { select: { id: true, nombre: true } },
+        service: { select: { id: true, nombre: true } },
+        plan: { select: { id: true, nombrePlan: true } },
+      },
+    });
+  }
+
+  async deletePrice(id: string) {
+    return this.prisma.providerPrice.update({
+      where: { id },
+      data: { activo: false },
+    });
+  }
+
+  async getBestRatesByService() {
+    const services = await this.prisma.service.findMany({
+      where: { activo: true },
+      include: {
+        plans: {
+          where: { activo: true },
+          orderBy: { precio: 'asc' },
+        },
+        providerPrices: {
+          where: { activo: true, provider: { estado: 'ACTIVO' } },
+          include: {
+            provider: { select: { id: true, nombre: true, tasaFallo: true } },
+          },
+          orderBy: { precio: 'asc' },
+        },
+      },
+    });
+
+    return services.map((s) => {
+      const bestPrice = s.providerPrices[0] || null;
+      const defaultPlan = s.plans[0] || null;
+      const costoProveedor = bestPrice ? Number(bestPrice.precio) : 0;
+      const precioVentaPublico = defaultPlan ? Number(defaultPlan.precio) : 0;
+      const margenNeto = precioVentaPublico > 0 && costoProveedor > 0 ? precioVentaPublico - costoProveedor : 0;
+      const porcentajeMargen = precioVentaPublico > 0 ? ((margenNeto / precioVentaPublico) * 100).toFixed(1) : '0';
+
+      return {
+        serviceId: s.id,
+        serviceNombre: s.nombre,
+        logoUrl: s.logoUrl,
+        mejorProveedor: bestPrice
+          ? {
+              id: bestPrice.provider.id,
+              nombre: bestPrice.provider.nombre,
+              tasaFallo: Number(bestPrice.provider.tasaFallo),
+              costo: costoProveedor,
+              duracionDias: bestPrice.duracionDias,
+              moneda: bestPrice.moneda,
+            }
+          : null,
+        precioVentaPVP: precioVentaPublico,
+        margenEstimadoCOP: margenNeto,
+        porcentajeMargen: Number(porcentajeMargen),
+        totalProveedoresDisponibles: s.providerPrices.length,
+      };
+    });
+  }
 }
+

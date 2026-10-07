@@ -36,9 +36,17 @@ import {
   FileText,
   LifeBuoy,
   MessageCircle,
+  Sparkles,
+  Clock,
+  Send,
+  BellRing,
+  Timer,
+  CheckCheck,
 } from 'lucide-react';
 import { useDialog } from '@/components/Dialog';
 import Cookies from 'js-cookie';
+import CountryDialSelector, { COUNTRIES } from '@/components/CountryDialSelector';
+import WhatsAppPromoModal from '@/components/WhatsAppPromoModal';
 
 // Normas de Uso y Condiciones adjuntas a cada entrega de suscripción
 const TERMS_MESSAGE = `
@@ -133,9 +141,12 @@ export default function CustomersManagementPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<any | null>(null);
   const [deletingCustomer, setDeletingCustomer] = useState<any | null>(null);
+  const [promoModalCustomer, setPromoModalCustomer] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   // Formulario de edición
+  const [editIndicativo, setEditIndicativo] = useState('+57');
+  const [editNumero, setEditNumero] = useState('');
   const [editForm, setEditForm] = useState({
     nombre: '',
     email: '',
@@ -149,6 +160,14 @@ export default function CustomersManagementPage() {
 
   // Mostrar contraseñas en modal de detalle
   const [revealedPasswords, setRevealedPasswords] = useState<{ [key: string]: boolean }>({});
+
+  const formatCOP = (val: number) => {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    }).format(val || 0);
+  };
 
   const showFeedback = (text: string, type: 'success' | 'error' = 'success') => {
     setFeedbackMsg({ type, text });
@@ -298,11 +317,25 @@ export default function CustomersManagementPage() {
   // Abrir Modal de Edición
   const openEditModal = (cust: any) => {
     setEditingCustomer(cust);
+    const raw = (cust.whatsapp || cust.telefono || '').trim();
+    let matchedInd = '+57';
+    let matchedNum = raw;
+    if (raw.startsWith('+')) {
+      const found = COUNTRIES.find((c) => raw.startsWith(c.code));
+      if (found) {
+        matchedInd = found.code;
+        matchedNum = raw.slice(found.code.length).replace(/\D/g, '');
+      }
+    } else {
+      matchedNum = raw.replace(/\D/g, '');
+    }
+    setEditIndicativo(matchedInd);
+    setEditNumero(matchedNum);
     setEditForm({
       nombre: cust.nombre || '',
       email: cust.email || '',
-      whatsapp: cust.whatsapp || cust.telefono || '',
-      phone: cust.telefono || cust.whatsapp || '',
+      whatsapp: raw,
+      phone: raw,
       pais: cust.pais || 'Colombia',
       activo: cust.activo !== false,
       password: '',
@@ -317,11 +350,12 @@ export default function CustomersManagementPage() {
 
     try {
       setActionLoading(true);
+      const fullPhone = `${editIndicativo}${editNumero.replace(/\D/g, '')}`;
       const payload: any = {
         nombre: editForm.nombre,
         email: editForm.email,
-        whatsapp: editForm.whatsapp,
-        phone: editForm.whatsapp,
+        whatsapp: fullPhone,
+        phone: fullPhone,
         pais: editForm.pais,
       };
       if (isAdmin) {
@@ -336,10 +370,10 @@ export default function CustomersManagementPage() {
           c.id === editingCustomer.id
             ? {
                 ...c,
-                nombre: editForm.nombre,
+                nombre: res.data?.customer?.user?.nombre || editForm.nombre,
                 email: editForm.email,
-                whatsapp: editForm.whatsapp,
-                telefono: editForm.whatsapp,
+                whatsapp: fullPhone,
+                telefono: fullPhone,
                 pais: editForm.pais,
                 ...(isAdmin ? { activo: editForm.activo } : {}),
               }
@@ -592,10 +626,10 @@ export default function CustomersManagementPage() {
 
       {/* Tarjetas KPI */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="p-4 bg-gray-950/60 border border-gray-850 rounded-2xl">
-          <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
-            Total Clientes
-          </div>
+            <div className="p-4 bg-[#0b0f19] border border-gray-850 rounded-2xl shadow-xl">
+              <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                Total Clientes
+              </div>
           <div className="text-2xl font-bold text-white mt-1">{kpis.total}</div>
           <div className="text-[10px] text-gray-500 mt-0.5">En base de datos</div>
         </div>
@@ -981,7 +1015,27 @@ export default function CustomersManagementPage() {
                             </div>
                           </div>
 
-                          {/* 2. Editar Contacto y Estado */}
+                          {/* 2. Generador de Copy WhatsApp Contextual (SRS Req. 1) */}
+                          <div className="relative group/tooltip inline-flex items-center">
+                            <button
+                              onClick={() => setPromoModalCustomer({
+                                id: cust.id,
+                                nombre: cust.nombre,
+                                phone: cust.whatsapp || cust.telefono,
+                              })}
+                              className="p-1.5 bg-gray-900 hover:bg-emerald-950/50 border border-gray-800 hover:border-emerald-800/50 text-emerald-400 hover:text-emerald-300 rounded-lg cursor-pointer transition-colors"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </button>
+                            <div className="absolute bottom-full right-0 mb-2 opacity-0 group-hover/tooltip:opacity-100 transition-opacity duration-150 pointer-events-none z-50 flex flex-col items-end">
+                              <div className="bg-gray-900 border border-emerald-800 text-emerald-300 text-[11px] font-semibold py-1 px-2.5 rounded-lg shadow-2xl whitespace-nowrap">
+                                Generar Mensaje WhatsApp Personalizado
+                              </div>
+                              <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-emerald-800 mr-[9px] -mt-[1px]"></div>
+                            </div>
+                          </div>
+
+                          {/* 3. Editar Contacto y Estado */}
                           <div className="relative group/tooltip inline-flex items-center">
                             <button
                               onClick={() => openEditModal(cust)}
@@ -1436,17 +1490,15 @@ export default function CustomersManagementPage() {
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 mb-1">
                   <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                  <span>WhatsApp / Celular (Clave Principal) *</span>
+                  <span>WhatsApp / Celular (Clave Principal E.164) *</span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={editForm.whatsapp}
-                  onChange={(e) => setEditForm({ ...editForm, whatsapp: e.target.value })}
-                  placeholder="Ej: 573042141522"
-                  className="w-full px-3 py-2 bg-gray-900 border border-emerald-900/60 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono font-bold"
+                <CountryDialSelector
+                  indicativo={editIndicativo}
+                  numero={editNumero}
+                  onIndicativoChange={setEditIndicativo}
+                  onNumeroChange={setEditNumero}
                 />
-                <p className="text-[10px] text-gray-500 mt-0.5">Identificador único principal del cliente en toda la plataforma.</p>
+                <p className="text-[10px] text-gray-500 mt-1">Identificador único principal del cliente en toda la plataforma (SRS Punto 10: E.164).</p>
               </div>
 
               <div>
@@ -1614,6 +1666,17 @@ export default function CustomersManagementPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ================= MODAL GENERADOR PROMO WHATSAPP (SRS REQ. 1) ================= */}
+      {promoModalCustomer && (
+        <WhatsAppPromoModal
+          customerId={promoModalCustomer.id}
+          customerName={promoModalCustomer.nombre}
+          customerPhone={promoModalCustomer.phone}
+          isOpen={!!promoModalCustomer}
+          onClose={() => setPromoModalCustomer(null)}
+        />
       )}
     </div>
   );

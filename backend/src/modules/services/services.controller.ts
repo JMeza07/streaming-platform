@@ -22,6 +22,18 @@ export class ServicesController {
     return this.servicesService.findAll();
   }
 
+  // SRS RF-007 (PUNTO 16): Catálogo dinámico para WhatsApp
+  @Get('templates/catalog')
+  getTemplatesCatalog() {
+    return this.servicesService.generatePriceListTemplate();
+  }
+
+  // SRS RF-007 (PUNTO 16): Plantilla para un servicio específico
+  @Get('templates/for-service/:id')
+  getTemplateForService(@Param('id') id: string) {
+    return this.servicesService.generateServiceTemplate(id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.servicesService.findOne(id);

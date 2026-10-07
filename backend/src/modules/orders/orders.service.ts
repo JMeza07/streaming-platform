@@ -131,6 +131,9 @@ export class OrdersService {
           estado: OrderStatus.PENDIENTE,
           metodoPago: dto.metodoPago,
           comprobanteUrl: dto.comprobanteUrl,
+          clase: dto.clase || 'NUEVA',
+          banco: dto.banco || null,
+          aut: dto.aut || null,
           vendedorId,
           vendedorNombre,
           descripcionVenta: dto.descripcionVenta || descripcionVentaInicial,
@@ -382,6 +385,9 @@ export class OrdersService {
           metodoPago: dto.metodoPago,
           referenciaExterna: dto.referenciaExterna || null,
           comprobanteUrl: dto.comprobanteUrl || null,
+          clase: dto.clase || 'NUEVA',
+          banco: dto.banco || null,
+          aut: dto.aut || null,
           vendedorId: beneficiaryUser.id,
           vendedorNombre: beneficiaryUser.nombre,
           vendedorPorcentaje: porcentajeAplicado,
@@ -428,9 +434,12 @@ export class OrdersService {
 
       // Asignar cuentas FIFO
       const suscripciones = [];
+      let costoAcumulado = 0;
+
       for (let i = 0; i < cantidad; i++) {
         const account = await tx.account.findFirst({
           where: { planId: plan.id, estado: AccountStatus.DISPONIBLE },
+          include: { rootAccount: true },
           orderBy: { createdAt: 'asc' },
         });
 
@@ -443,12 +452,27 @@ export class OrdersService {
         const fechaVencimiento = new Date();
         fechaVencimiento.setDate(fechaVencimiento.getDate() + plan.duracionDias);
 
+        let costoPerfil = 0;
+        if (account.rootAccount) {
+          const maxP = account.rootAccount.maxPerfiles || 5;
+          costoPerfil = account.rootAccount.costoCompra ? Number(account.rootAccount.costoCompra) / maxP : Number(account.costoCompra || 0);
+        } else {
+          costoPerfil = Number(account.costoCompra || 0);
+        }
+        const ganancia = Math.max(0, Number(plan.precio) - costoPerfil);
+        costoAcumulado += costoPerfil;
+
         const subscription = await tx.subscription.create({
           data: {
             customerId: customer.id,
             planId: plan.id,
             accountId: account.id,
             orderId: order.id,
+            clase: dto.clase || 'NUEVA',
+            costoPerfil,
+            ganancia,
+            fechaUltimoCambioClave: new Date(),
+            estadoLibre: 'VENDIDA',
             fechaVencimiento,
             estado: SubscriptionStatus.ACTIVA,
           },
@@ -465,6 +489,15 @@ export class OrdersService {
 
         suscripciones.push(subscription);
       }
+
+      const gananciaNeta = total - costoAcumulado - (comisionMonto || 0);
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          costoTotal: costoAcumulado,
+          gananciaNeta,
+        },
+      });
 
       return { order, suscripciones };
     });
@@ -669,6 +702,7 @@ export class OrdersService {
       }
 
       const suscripciones = [];
+      let costoAcumulado = 0;
 
       // 3. Para cada item, buscar cuenta disponible y crear suscripción
       for (const item of order.items) {
@@ -680,12 +714,14 @@ export class OrdersService {
               reservedByCustomerId: order.customerId,
               estado: AccountStatus.PENDIENTE_PAGO,
             },
+            include: { rootAccount: true },
             orderBy: { createdAt: 'asc' },
           });
 
           if (!account) {
             account = await tx.account.findFirst({
               where: { planId: item.planId, estado: AccountStatus.DISPONIBLE },
+              include: { rootAccount: true },
               orderBy: { createdAt: 'asc' },
             });
           }
@@ -711,7 +747,17 @@ export class OrdersService {
             fechaVencimiento.setDate(fechaVencimiento.getDate() + item.plan.duracionDias);
           }
 
-          // Crear suscripción
+          let costoPerfil = 0;
+          if (account.rootAccount) {
+            const maxP = account.rootAccount.maxPerfiles || 5;
+            costoPerfil = account.rootAccount.costoCompra ? Number(account.rootAccount.costoCompra) / maxP : Number(account.costoCompra || 0);
+          } else {
+            costoPerfil = Number(account.costoCompra || 0);
+          }
+          const ganancia = Math.max(0, Number(item.plan.precio) - costoPerfil);
+          costoAcumulado += costoPerfil;
+
+          // Crear suscripción con campos de trazabilidad SGVS
           const subscription = await tx.subscription.create({
             data: {
               customerId: order.customerId,
@@ -719,6 +765,11 @@ export class OrdersService {
               accountId: account.id,
               orderId: order.id,
               parentSubscriptionId: parentSubId,
+              clase: order.clase || 'NUEVA',
+              costoPerfil,
+              ganancia,
+              fechaUltimoCambioClave: new Date(),
+              estadoLibre: 'VENDIDA',
               fechaVencimiento,
               estado: 'ACTIVA',
             },
@@ -741,6 +792,16 @@ export class OrdersService {
           suscripciones.push(subscription);
         }
       }
+
+      // Actualizar costos y ganancia neta en la orden
+      const gananciaNeta = Number(order.total) - costoAcumulado - (comisionMonto || 0);
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          costoTotal: costoAcumulado,
+          gananciaNeta,
+        },
+      });
 
       return suscripciones;
     });
@@ -1390,11 +1451,10 @@ export class OrdersService {
     }
 
     const finalComprobante = (comprobanteUrl && comprobanteUrl.trim()) || order.comprobanteUrl;
-    const isEfectivo = (order.metodoPago || '').toLowerCase().includes('efectivo');
 
-    if (!isEfectivo && !finalComprobante) {
+    if (!finalComprobante || !finalComprobante.trim()) {
       throw new BadRequestException(
-        'Para renovaciones pagadas con medios electrónicos es obligatorio adjuntar y verificar el comprobante de pago.',
+        'Es obligatorio adjuntar y verificar el comprobante de pago para poder aprobar la renovación.',
       );
     }
 

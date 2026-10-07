@@ -34,6 +34,24 @@ const DEFAULT_MEDIOS_PAGO = [
   },
 ];
 
+const DEFAULT_HERO_CONFIG = {
+  enabled: true,
+  images: [
+    'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?q=80&w=2069&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=2025&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=2084&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=2070&auto=format&fit=crop',
+  ],
+  transitionDuration: 6, // segundos entre cada imagen
+  fadeSpeed: 1.5, // velocidad de transición en segundos
+  opacity: 0.40, // 40% de opacidad para que resalte el texto
+  overlayColor: '#030712', // color de la capa frontal
+  overlayOpacity: 0.70, // 70% de opacidad de la capa frontal
+  enableParallax: true, // Efecto Parallax interactivo
+  enableKenBurns: true, // Efecto suave de zoom continuo tipo Netflix
+  overlayGradient: 'cinematic', // 'cinematic' | 'radial' | 'linear' | 'none'
+};
+
 @Injectable()
 export class SettingsService {
   constructor(private prisma: PrismaService) {}
@@ -57,13 +75,29 @@ export class SettingsService {
           comisionBase: 10,
           garantiaDiasBase: 30,
           mediosPago: DEFAULT_MEDIOS_PAGO,
+          heroConfig: DEFAULT_HERO_CONFIG,
         },
       });
-    } else if (!settings.mediosPago || (Array.isArray(settings.mediosPago) && (settings.mediosPago as any[]).length === 0)) {
-      settings = await this.prisma.systemSetting.update({
-        where: { id: 'singleton' },
-        data: { mediosPago: DEFAULT_MEDIOS_PAGO },
-      });
+    } else {
+      let needsUpdate = false;
+      const updatePayload: any = {};
+
+      if (!settings.mediosPago || (Array.isArray(settings.mediosPago) && (settings.mediosPago as any[]).length === 0)) {
+        updatePayload.mediosPago = DEFAULT_MEDIOS_PAGO;
+        needsUpdate = true;
+      }
+
+      if (!settings.heroConfig || typeof settings.heroConfig !== 'object' || Object.keys(settings.heroConfig as any).length === 0) {
+        updatePayload.heroConfig = DEFAULT_HERO_CONFIG;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        settings = await this.prisma.systemSetting.update({
+          where: { id: 'singleton' },
+          data: updatePayload,
+        });
+      }
     }
 
     return settings;
@@ -80,6 +114,7 @@ export class SettingsService {
     comisionBase?: number;
     garantiaDiasBase?: number;
     mediosPago?: any;
+    heroConfig?: any;
   }) {
     // Asegurar que exista
     await this.getSettings();
@@ -109,6 +144,9 @@ export class SettingsService {
         }),
         ...(dto.mediosPago !== undefined && {
           mediosPago: dto.mediosPago,
+        }),
+        ...(dto.heroConfig !== undefined && {
+          heroConfig: dto.heroConfig,
         }),
       },
     });

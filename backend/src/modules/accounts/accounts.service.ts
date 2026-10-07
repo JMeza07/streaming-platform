@@ -2,6 +2,9 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException, 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { ImportAccountsDto } from './dto/import-accounts.dto';
+import { AddToCemeteryDto } from './dto/cemetery.dto';
+import { RenewRootAccountDto } from './dto/renew-root-account.dto';
+import { calculateSgvsState } from '../../common/utils/sgvs-status.util';
 import { AccountStatus, SubscriptionStatus, AuditCategory, AuditSeverity, RootAccountStatus } from '@prisma/client';
 import { WarrantyService } from '../warranty/warranty.service';
 import { AuditService } from '../audit/audit.service';
@@ -251,6 +254,9 @@ export class AccountsService implements OnModuleInit {
     fechaVencimientoRaiz?: string | Date;
     costoCompra?: number;
     maxPerfiles?: number;
+    diaFacturacion?: number;
+    alertaFacturacionDias?: number;
+    metodoPagoProveedor?: string;
     imapHost?: string;
     imapPort?: number;
     imapUser?: string;
@@ -258,6 +264,15 @@ export class AccountsService implements OnModuleInit {
     imapSecure?: boolean;
   }) {
     const emailRaiz = data.email.trim();
+
+    // Verificación bloqueante de Lista Negra / Cementerio de Cuentas (SRS SGVS RF-027, RF-035, RF-011)
+    const inCemetery = await this.prisma.cemeteryAccount.findUnique({ where: { email: emailRaiz } });
+    if (inCemetery) {
+      throw new BadRequestException(
+        `El correo "${emailRaiz}" se encuentra registrado en el Cementerio de Cuentas / Lista Negra y no puede ser reactivado. Motivo: ${inCemetery.motivoBaja}`,
+      );
+    }
+
     const existing = await this.prisma.rootAccount.findUnique({ where: { email: emailRaiz } });
     if (existing) throw new ConflictException('Esta cuenta raíz ya existe');
 
@@ -304,6 +319,9 @@ export class AccountsService implements OnModuleInit {
         fechaVencimientoRaiz: data.fechaVencimientoRaiz ? new Date(data.fechaVencimientoRaiz) : null,
         costoCompra: data.costoCompra !== undefined ? data.costoCompra : 0,
         maxPerfiles: maxPerfiles,
+        diaFacturacion: data.diaFacturacion || null,
+        alertaFacturacionDias: data.alertaFacturacionDias || 5,
+        metodoPagoProveedor: data.metodoPagoProveedor || null,
         imapHost: data.imapHost,
         imapPort: data.imapPort || 993,
         imapUser: data.imapUser,
@@ -342,7 +360,7 @@ export class AccountsService implements OnModuleInit {
   }
 
   async getRootAccounts(filters?: { serviceId?: string; providerId?: string; estado?: RootAccountStatus }) {
-    return this.prisma.rootAccount.findMany({
+    const rootAccounts = await this.prisma.rootAccount.findMany({
       where: {
         ...(filters?.serviceId && { serviceId: filters.serviceId }),
         ...(filters?.providerId && { providerId: filters.providerId }),
@@ -359,13 +377,46 @@ export class AccountsService implements OnModuleInit {
             assignedPin: true,
             subscriptions: {
               where: { estado: SubscriptionStatus.ACTIVA },
-              select: { id: true, customer: { select: { user: { select: { nombre: true, email: true } } } } },
+              select: {
+                id: true,
+                fechaInicio: true,
+                fechaVencimiento: true,
+                fechaUltimoCambioClave: true,
+                estadoLibre: true,
+                clase: true,
+                customer: { select: { user: { select: { nombre: true, email: true } } } },
+              },
             },
           },
         },
-        _count: { select: { accounts: true, incidents: true, infractions: true } },
+        _count: { select: { accounts: true, incidents: true, infractions: true, passwordChanges: true } },
       },
       orderBy: { createdAt: 'desc' },
+    });
+
+    // Enriquecer en tiempo real con el estado SGVS de cada perfil / cuenta (RN-004 y F1.4.1)
+    return rootAccounts.map((root) => {
+      const perfilesCalculados = root.accounts.map((acc) => {
+        const sub = acc.subscriptions[0];
+        let sgvsInfo = null;
+        if (sub && sub.fechaVencimiento) {
+          sgvsInfo = calculateSgvsState({
+            fechaVencimiento: sub.fechaVencimiento,
+            fechaInicio: sub.fechaInicio,
+            fechaUltimoCambioClave: sub.fechaUltimoCambioClave,
+            estadoSuscripcion: acc.estado,
+          });
+        }
+        return {
+          ...acc,
+          sgvsState: sgvsInfo,
+        };
+      });
+
+      return {
+        ...root,
+        accounts: perfilesCalculados,
+      };
     });
   }
 
@@ -479,25 +530,9 @@ export class AccountsService implements OnModuleInit {
 
     if (!root) throw new NotFoundException('Cuenta raíz no encontrada');
 
-    // 1. Actualizar contraseña en BD y en los perfiles asociados
-    await this.prisma.$transaction(async (tx) => {
-      await tx.rootAccount.update({
-        where: { id },
-        data: {
-          password: newPassword,
-          requiresPasswordChange: false,
-          estado: RootAccountStatus.ACTIVA,
-        },
-      });
-
-      await tx.account.updateMany({
-        where: { rootAccountId: id },
-        data: { passwordCuenta: newPassword },
-      });
-    });
-
-    // 2. Notificar proactivamente a clientes legítimos (excluyendo infractor si aplica)
+    // 1. Notificar proactivamente a clientes legítimos (excluyendo infractor si aplica)
     const notificados: string[] = [];
+    const accountIds = root.accounts.map((a) => a.id);
 
     for (const acc of root.accounts) {
       for (const sub of acc.subscriptions) {
@@ -522,6 +557,48 @@ export class AccountsService implements OnModuleInit {
         }
       }
     }
+
+    // 2. Actualizar contraseña en BD, registrar historial en PasswordChange y actualizar fecha en suscripciones
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rootAccount.update({
+        where: { id },
+        data: {
+          password: newPassword,
+          requiresPasswordChange: false,
+          estado: RootAccountStatus.ACTIVA,
+        },
+      });
+
+      await tx.account.updateMany({
+        where: { rootAccountId: id },
+        data: { passwordCuenta: newPassword },
+      });
+
+      if (accountIds.length > 0) {
+        await tx.subscription.updateMany({
+          where: {
+            accountId: { in: accountIds },
+            estado: SubscriptionStatus.ACTIVA,
+          },
+          data: {
+            fechaUltimoCambioClave: now,
+          },
+        });
+      }
+
+      await tx.passwordChange.create({
+        data: {
+          rootAccountId: id,
+          asesorId: currentUser?.id || currentUser?.userId || null,
+          asesorNombre: currentUser?.nombre || null,
+          claveAnterior: root.password,
+          claveNueva: newPassword,
+          motivo: 'Actualización periódica / mantenimiento de seguridad SGVS',
+          clientesNotificados: notificados.length,
+        },
+      });
+    });
 
     await this.auditService.registrarEvento({
       usuarioId: currentUser?.id || currentUser?.userId,
@@ -805,6 +882,16 @@ export class AccountsService implements OnModuleInit {
   // CREACIÓN, IMPORTACIÓN Y GESTIÓN GENERAL DE PERFILES / ACCOUNTS
   // =========================================================================
   async create(dto: CreateAccountDto) {
+    const emailCuenta = dto.emailCuenta.trim();
+
+    // Verificación bloqueante de Lista Negra / Cementerio de Cuentas (SRS SGVS RF-027, RF-035, RF-011)
+    const inCemetery = await this.prisma.cemeteryAccount.findUnique({ where: { email: emailCuenta } });
+    if (inCemetery) {
+      throw new BadRequestException(
+        `El correo "${emailCuenta}" se encuentra bloqueado en el Cementerio de Cuentas / Lista Negra. Motivo: ${inCemetery.motivoBaja}`,
+      );
+    }
+
     const plan = await this.prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException('Plan no encontrado');
 
@@ -834,6 +921,7 @@ export class AccountsService implements OnModuleInit {
 
     let importados = 0;
     let duplicados = 0;
+    let bloqueadosCementerio = 0;
     const errores: string[] = [];
     const batchSize = 50;
 
@@ -841,10 +929,18 @@ export class AccountsService implements OnModuleInit {
       const batch = dto.accounts.slice(i, i + batchSize);
       for (const acc of batch) {
         try {
+          const email = acc.emailCuenta.trim();
+          const inCemetery = await this.prisma.cemeteryAccount.findUnique({ where: { email } });
+          if (inCemetery) {
+            bloqueadosCementerio++;
+            errores.push(`Ignorado por Lista Negra/Cementerio: ${email}`);
+            continue;
+          }
+
           await this.prisma.account.create({
             data: {
               planId: dto.planId,
-              emailCuenta: acc.emailCuenta,
+              emailCuenta: email,
               passwordCuenta: acc.passwordCuenta,
               perfilAsignado: acc.perfilAsignado,
               pinPerfil: acc.pinPerfil,
@@ -874,12 +970,13 @@ export class AccountsService implements OnModuleInit {
       });
     }
 
-    return { importados, duplicados, errores };
+    return { importados, duplicados, bloqueadosCementerio, errores };
   }
 
   async findAll(filters: { planId?: string; estado?: AccountStatus; batchId?: string; providerId?: string; search?: string }) {
     return this.prisma.account.findMany({
       where: {
+        deletedAt: null,
         ...(filters.planId && { planId: filters.planId }),
         ...(filters.estado && { estado: filters.estado }),
         ...(filters.batchId && { batchId: filters.batchId }),
@@ -902,8 +999,8 @@ export class AccountsService implements OnModuleInit {
   }
 
   async findOne(id: string) {
-    const account = await this.prisma.account.findUnique({
-      where: { id },
+    const account = await this.prisma.account.findFirst({
+      where: { id, deletedAt: null },
       include: {
         plan: { include: { service: true } },
         rootAccount: { include: { provider: true } },
@@ -917,7 +1014,7 @@ export class AccountsService implements OnModuleInit {
   }
 
   async update(id: string, dto: any) {
-    const account = await this.prisma.account.findUnique({ where: { id } });
+    const account = await this.prisma.account.findFirst({ where: { id, deletedAt: null } });
     if (!account) throw new NotFoundException('Perfil no encontrado');
 
     const updated = await this.prisma.account.update({
@@ -936,7 +1033,16 @@ export class AccountsService implements OnModuleInit {
   }
 
   async remove(id: string) {
-    return this.prisma.account.delete({ where: { id } });
+    const account = await this.prisma.account.findFirst({ where: { id, deletedAt: null } });
+    if (!account) throw new NotFoundException('Perfil no encontrado o ya eliminado');
+
+    return this.prisma.account.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        estado: AccountStatus.DEFECTUOSA,
+      },
+    });
   }
 
   async getBatches() {
@@ -970,6 +1076,334 @@ export class AccountsService implements OnModuleInit {
       planes,
       rootAccountsCount,
       providersCount,
+    };
+  }
+
+  // =========================================================================
+  // GESTIÓN DE CEMENTERIO DE CUENTAS / LISTA NEGRA (SRS SGVS RF-027, RF-035, RF-011)
+  // =========================================================================
+  async addToCemetery(dto: AddToCemeteryDto, currentUser: any) {
+    const email = dto.email.trim();
+    const existing = await this.prisma.cemeteryAccount.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException(`El correo "${email}" ya se encuentra registrado en el Cementerio de Cuentas.`);
+    }
+
+    const cemetery = await this.prisma.$transaction(async (tx) => {
+      // 1. Crear registro en cementerio
+      const created = await tx.cemeteryAccount.create({
+        data: {
+          email,
+          plataforma: dto.plataforma || null,
+          motivoBaja: dto.motivoBaja,
+          estadoCuenta: dto.estadoCuenta || 'COMPROMETIDA',
+          rootAccountId: dto.rootAccountId || null,
+          registradoPor: currentUser?.nombre || currentUser?.email || 'Sistema',
+        },
+        include: {
+          rootAccount: true,
+        },
+      });
+
+      // 2. Si corresponde a una cuenta raíz, marcarla como CAIDA y sus perfiles como DEFECTUOSA
+      if (dto.rootAccountId) {
+        await tx.rootAccount.update({
+          where: { id: dto.rootAccountId },
+          data: { estado: RootAccountStatus.CAIDA },
+        });
+
+        await tx.account.updateMany({
+          where: { rootAccountId: dto.rootAccountId },
+          data: { estado: AccountStatus.DEFECTUOSA },
+        });
+      } else if (dto.accountId) {
+        await tx.account.update({
+          where: { id: dto.accountId },
+          data: { estado: AccountStatus.DEFECTUOSA },
+        });
+      }
+
+      return created;
+    });
+
+    await this.auditService.registrarEvento({
+      usuarioId: currentUser?.id || currentUser?.userId,
+      modulo: AuditCategory.INVENTARIO,
+      accion: 'ENVIO_CEMENTERIO_CUENTAS',
+      severidad: AuditSeverity.WARNING,
+      descripcion: `Cuenta [${email}] enviada al Cementerio de Cuentas / Lista Negra. Motivo: ${dto.motivoBaja}`,
+      entidadTipo: 'CemeteryAccount',
+      entidadId: cemetery.id,
+    });
+
+    return {
+      message: `Cuenta ${email} enviada exitosamente al Cementerio de Cuentas.`,
+      cemetery,
+    };
+  }
+
+  async getCemeteryAccounts(search?: string, page = 1, limit = 50) {
+    const skip = (page - 1) * limit;
+    const where = search
+      ? {
+          OR: [
+            { email: { contains: search, mode: 'insensitive' as const } },
+            { motivoBaja: { contains: search, mode: 'insensitive' as const } },
+            { plataforma: { contains: search, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
+
+    const [total, items] = await Promise.all([
+      this.prisma.cemeteryAccount.count({ where }),
+      this.prisma.cemeteryAccount.findMany({
+        where,
+        include: {
+          rootAccount: { select: { id: true, email: true, service: { select: { nombre: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      items,
+    };
+  }
+
+  async removeFromCemetery(id: string, currentUser: any) {
+    const item = await this.prisma.cemeteryAccount.findUnique({ where: { id } });
+    if (!item) throw new NotFoundException('Registro de cementerio no encontrado');
+
+    await this.prisma.cemeteryAccount.delete({ where: { id } });
+
+    await this.auditService.registrarEvento({
+      usuarioId: currentUser?.id || currentUser?.userId,
+      modulo: AuditCategory.INVENTARIO,
+      accion: 'DESBLOQUEO_CEMENTERIO_CUENTAS',
+      severidad: AuditSeverity.INFO,
+      descripcion: `Cuenta [${item.email}] removida del Cementerio de Cuentas / Lista Negra.`,
+      entidadTipo: 'CemeteryAccount',
+      entidadId: id,
+    });
+
+    return {
+      message: `Cuenta ${item.email} removida del Cementerio de Cuentas y desbloqueada.`,
+    };
+  }
+
+  // =========================================================================
+  // HISTORIAL DE CAMBIOS DE CLAVE (SRS SGVS RF-010)
+  // =========================================================================
+  async getPasswordHistory(filters?: { rootAccountId?: string; accountId?: string; limit?: number }) {
+    const limit = filters?.limit || 100;
+    return this.prisma.passwordChange.findMany({
+      where: {
+        ...(filters?.rootAccountId && { rootAccountId: filters.rootAccountId }),
+        ...(filters?.accountId && { accountId: filters.accountId }),
+      },
+      include: {
+        rootAccount: { select: { id: true, email: true, service: { select: { nombre: true } } } },
+        account: { select: { id: true, emailCuenta: true, perfilAsignado: true } },
+        asesor: { select: { id: true, nombre: true, email: true, rol: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  // =========================================================================
+  // RENOVACIÓN DE CUENTAS MATRICES / HISTORIAL (SRS Req. Adicional 10 / Punto 18)
+  // =========================================================================
+  async renewRootAccount(id: string, dto: RenewRootAccountDto, currentUser: any) {
+    const root = await this.prisma.rootAccount.findUnique({
+      where: { id },
+      include: {
+        provider: true,
+        service: true,
+        accounts: {
+          where: { estado: AccountStatus.DISPONIBLE },
+        },
+      },
+    });
+
+    if (!root) throw new NotFoundException('Cuenta matriz no encontrada');
+
+    const now = new Date();
+    const fechaBase =
+      root.fechaVencimientoRaiz && new Date(root.fechaVencimientoRaiz) > now
+        ? new Date(root.fechaVencimientoRaiz)
+        : now;
+
+    const nuevaFechaVencimiento = new Date(fechaBase.getTime() + dto.diasExtendidos * 24 * 60 * 60 * 1000);
+    const costoRenovacion = Number(dto.costoRenovacion);
+    const costoAnterior = root.costoCompra ? Number(root.costoCompra) : 0;
+    const maxPerfiles = root.maxPerfiles || 5;
+    const nuevoCostoPerfil = costoRenovacion / maxPerfiles;
+
+    const renewal = await this.prisma.$transaction(async (tx) => {
+      // 1. Actualizar cuenta raíz
+      await tx.rootAccount.update({
+        where: { id },
+        data: {
+          fechaVencimientoRaiz: nuevaFechaVencimiento,
+          costoCompra: costoRenovacion,
+          estado: RootAccountStatus.ACTIVA,
+        },
+      });
+
+      // 2. Actualizar costo promedio por perfil en pantallas disponibles
+      await tx.account.updateMany({
+        where: {
+          rootAccountId: id,
+          estado: AccountStatus.DISPONIBLE,
+        },
+        data: {
+          costoCompra: nuevoCostoPerfil,
+        },
+      });
+
+      // 3. Registrar en historial de renovaciones
+      return tx.rootAccountRenewal.create({
+        data: {
+          rootAccountId: id,
+          providerId: root.providerId,
+          fechaRenovacion: now,
+          diasExtendidos: dto.diasExtendidos,
+          fechaVencimientoPrevia: root.fechaVencimientoRaiz,
+          nuevaFechaVencimiento,
+          costoRenovacion,
+          costoAnterior,
+          usuarioId: currentUser?.id || currentUser?.userId || null,
+          usuarioNombre: currentUser?.nombre || 'Sistema',
+          notas: dto.notas || null,
+        },
+        include: {
+          rootAccount: { select: { id: true, email: true, service: { select: { nombre: true } } } },
+          provider: { select: { id: true, nombre: true } },
+        },
+      });
+    });
+
+    await this.auditService.registrarEvento({
+      usuarioId: currentUser?.id || currentUser?.userId,
+      usuarioNombre: currentUser?.nombre,
+      modulo: AuditCategory.INVENTARIO,
+      accion: 'RENOVACION_CUENTA_RAIZ',
+      severidad: AuditSeverity.SUCCESS,
+      descripcion: `Cuenta matriz [${root.email}] renovada por ${dto.diasExtendidos} días. Nuevo vencimiento: ${nuevaFechaVencimiento.toLocaleDateString('es-CO')} | Costo: $${costoRenovacion.toLocaleString('es-CO')}`,
+      entidadTipo: 'RootAccount',
+      entidadId: root.id,
+      detalles: {
+        rootAccountId: root.id,
+        diasExtendidos: dto.diasExtendidos,
+        nuevaFechaVencimiento,
+        costoRenovacion,
+      },
+    });
+
+    return {
+      message: `Cuenta matriz ${root.email} renovada exitosamente por ${dto.diasExtendidos} días.`,
+      renewal,
+    };
+  }
+
+  async getRootAccountRenewals(rootAccountId: string) {
+    return this.prisma.rootAccountRenewal.findMany({
+      where: { rootAccountId },
+      include: {
+        provider: { select: { id: true, nombre: true } },
+      },
+      orderBy: { fechaRenovacion: 'desc' },
+    });
+  }
+
+  // =========================================================================
+  // CONTROL DE FACTURACIÓN CON PROVEEDORES (SRS RF-031 / Punto 22)
+  // =========================================================================
+  async getBillingAlerts(diasAnticipacion = 5) {
+    const ahora = new Date();
+    const diaActual = ahora.getDate();
+    const mesActual = ahora.getMonth();
+    const anioActual = ahora.getFullYear();
+
+    const rootAccounts = await this.prisma.rootAccount.findMany({
+      where: {
+        estado: { notIn: [RootAccountStatus.CAIDA, RootAccountStatus.NO_RENOVAR] },
+      },
+      include: {
+        service: true,
+        provider: true,
+        _count: {
+          select: {
+            accounts: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const alertas: any[] = [];
+
+    for (const root of rootAccounts) {
+      let proximaFechaPago: Date | null = null;
+      let diasRestantes: number | null = null;
+
+      if (root.diaFacturacion) {
+        // Cálculo basado en el día fijo del mes (1 a 31)
+        const diaPago = Math.min(root.diaFacturacion, 28); // seguro para meses cortos
+        let fechaTarget = new Date(anioActual, mesActual, diaPago);
+        if (diaPago < diaActual) {
+          fechaTarget = new Date(anioActual, mesActual + 1, diaPago);
+        }
+        proximaFechaPago = fechaTarget;
+        diasRestantes = Math.ceil((fechaTarget.getTime() - ahora.getTime()) / (1000 * 60 * 60 * 24));
+      } else if (root.fechaVencimientoRaiz) {
+        // Fallback a fecha de vencimiento matriz
+        proximaFechaPago = new Date(root.fechaVencimientoRaiz);
+        diasRestantes = Math.ceil((proximaFechaPago.getTime() - ahora.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      if (diasRestantes !== null) {
+        const limiteAlerta = root.alertaFacturacionDias || diasAnticipacion;
+        if (diasRestantes <= limiteAlerta) {
+          const urgencia =
+            diasRestantes <= 1
+              ? 'CRITICA'
+              : diasRestantes <= 3
+              ? 'ALTA'
+              : 'MEDIA';
+
+          alertas.push({
+            rootAccountId: root.id,
+            email: root.email,
+            servicio: root.service?.nombre || 'Streaming',
+            proveedor: root.provider?.nombre || 'Proveedor Directo',
+            proveedorTelefono: root.provider?.telefono || null,
+            diaFacturacion: root.diaFacturacion || proximaFechaPago?.getDate(),
+            proximaFechaPago,
+            diasRestantes,
+            costoCompra: Number(root.costoCompra || 0),
+            metodoPagoProveedor: root.metodoPagoProveedor || 'Transferencia',
+            totalPerfiles: root.maxPerfiles,
+            urgencia,
+          });
+        }
+      }
+    }
+
+    // Ordenar alertas por días restantes ascendente (las más urgentes primero)
+    alertas.sort((a, b) => a.diasRestantes - b.diasRestantes);
+
+    return {
+      totalAlertas: alertas.length,
+      diasAnticipacion,
+      alertas,
     };
   }
 }

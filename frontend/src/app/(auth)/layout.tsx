@@ -4,19 +4,19 @@ import React from 'react';
 import Link from 'next/link';
 import { Tv } from 'lucide-react';
 import { useSettings, BrandTwoToneText } from '@/context/SettingsContext';
+import HeroParallaxBackground from '@/components/HeroParallaxBackground';
 
 export default function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { systemName, systemLogo } = useSettings();
+  const { systemName, systemLogo, heroConfig } = useSettings();
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between overflow-hidden bg-[#030712]">
-      {/* Background glow circles */}
-      <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-red-600/10 rounded-full blur-[120px]" />
-      <div className="pointer-events-none absolute -bottom-40 right-10 w-[500px] h-[500px] bg-blue-600/5 rounded-full blur-[140px]" />
+    <div className="relative min-h-screen flex flex-col justify-between overflow-hidden bg-[#030712] selection:bg-red-600 selection:text-white">
+      {/* Dynamic Netflix-Style Parallax Hero Background */}
+      <HeroParallaxBackground config={heroConfig} />
 
       {/* Header / Brand */}
       <header className="relative z-10 w-full max-w-7xl mx-auto px-6 py-6 flex items-center justify-between">

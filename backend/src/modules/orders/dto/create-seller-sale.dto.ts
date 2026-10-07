@@ -56,4 +56,17 @@ export class CreateSellerSaleDto {
   @IsOptional()
   @IsString()
   afiliadoId?: string;
+
+  // Campos SRS Oasis Virtual Store
+  @IsOptional()
+  @IsString()
+  clase?: string; // NUEVA, RENOVACION, GARANTIA
+
+  @IsOptional()
+  @IsString()
+  banco?: string; // Banco / Entidad financiera
+
+  @IsOptional()
+  @IsString()
+  aut?: string; // Número de autorización / comprobante
 }

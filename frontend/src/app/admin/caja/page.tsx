@@ -144,6 +144,7 @@ export default function CajaPage() {
   const [errorMsg, setErrorMsg] = useState('');
 
   const SUPERVISOR_PIN = '1234';
+  const [currentShiftId, setCurrentShiftId] = useState<string | null>(null);
 
   const fetchOrders = async () => {
     try {
@@ -157,6 +158,40 @@ export default function CajaPage() {
     }
   };
 
+  const fetchShift = async () => {
+    try {
+      const res = await api.get('/shifts/current');
+      if (res.data?.abierto && res.data.shift) {
+        const s = res.data.shift;
+        setCurrentShiftId(s.id);
+        const movs: CajaMovimiento[] = (s.movements || []).map((m: any) => ({
+          id: m.id,
+          tipo: m.tipo,
+          concepto: m.concepto,
+          monto: Number(m.monto),
+          operador: m.operadorNombre || s.asesorNombre,
+          vendedor: m.operadorNombre || s.asesorNombre,
+          timestamp: m.createdAt,
+          requiereSupervision: m.tipo === 'ANULACION' || m.tipo === 'DEVOLUCION',
+          metodoPago: m.metodoPago || 'Efectivo',
+          observaciones: m.observaciones,
+          esVentaSistema: m.tipo === 'VENTA_SISTEMA',
+        }));
+        const estadoServidor: EstadoCaja = {
+          abierta: true,
+          montoBase: Number(s.baseInicial),
+          apertura: s.horaInicio,
+          operador: s.asesorNombre,
+          movimientos: movs,
+        };
+        setCaja(estadoServidor);
+        guardarEstado(estadoServidor);
+      }
+    } catch (err) {
+      console.error('Error cargando turno del servidor:', err);
+    }
+  };
+
   useEffect(() => {
     const raw = Cookies.get('user') || (typeof window !== 'undefined' ? localStorage.getItem('user') : null);
     if (raw) {
@@ -166,6 +201,7 @@ export default function CajaPage() {
     }
     setCaja(cargarEstado());
     fetchOrders();
+    fetchShift();
     setLoaded(true);
   }, []);
 
@@ -568,11 +604,19 @@ export default function CajaPage() {
     setActiveTab('transacciones');
   };
 
-  const handleAbrirCaja = () => {
+  const handleAbrirCaja = async () => {
     const base = parseFloat(montoBase.replace(/[^0-9.]/g, ''));
     if (!base || base < 0) {
       setErrorMsg('El monto base debe ser mayor a 0.');
       return;
+    }
+    try {
+      const res = await api.post('/shifts/open', { baseInicial: base });
+      if (res.data?.shift?.id) {
+        setCurrentShiftId(res.data.shift.id);
+      }
+    } catch (err: any) {
+      console.warn('Backend shift open:', err?.message || err);
     }
     const nuevoEstado: EstadoCaja = {
       abierta: true,
@@ -590,7 +634,17 @@ export default function CajaPage() {
     setTimeout(() => setFeedbackMsg(''), 4000);
   };
 
-  const handleCerrarCaja = () => {
+  const handleCerrarCaja = async () => {
+    if (currentShiftId) {
+      try {
+        await api.post(`/shifts/${currentShiftId}/close`, {
+          saldoReal: metricas.saldoTotal,
+          observaciones: `Cierre regular de caja. Saldo: ${formatCOP(metricas.saldoTotal)}`,
+        });
+      } catch (err: any) {
+        console.warn('Backend shift close:', err?.message || err);
+      }
+    }
     const nuevoEstado: EstadoCaja = {
       ...caja,
       abierta: false,
@@ -599,11 +653,12 @@ export default function CajaPage() {
     setCaja(nuevoEstado);
     guardarEstado(nuevoEstado);
     setShowCierreModal(false);
+    setCurrentShiftId(null);
     setFeedbackMsg(`Caja cerrada. Saldo final arqueado: ${formatCOP(metricas.saldoTotal)}.`);
     setTimeout(() => setFeedbackMsg(''), 5000);
   };
 
-  const handleRegistrarMovimiento = () => {
+  const handleRegistrarMovimiento = async () => {
     const monto = parseFloat(movForm.monto.replace(/[^0-9.]/g, ''));
     if (!monto || monto <= 0) {
       setErrorMsg('El monto debe ser mayor a 0.');
@@ -612,6 +667,19 @@ export default function CajaPage() {
     if (!movForm.concepto.trim()) {
       setErrorMsg('El concepto es obligatorio.');
       return;
+    }
+    if (currentShiftId) {
+      try {
+        await api.post(`/shifts/${currentShiftId}/movements`, {
+          tipo: movForm.tipo,
+          concepto: movForm.concepto.trim(),
+          monto,
+          metodoPago: movForm.metodoPago,
+          observaciones: movForm.observaciones.trim() || undefined,
+        });
+      } catch (e: any) {
+        console.warn('Movement API error:', e?.message || e);
+      }
     }
     const mov: CajaMovimiento = {
       id: `mov-${Date.now()}`,

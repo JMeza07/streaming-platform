@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 import { Tv, LogOut, User, Phone, ShieldCheck, ShoppingBag } from 'lucide-react';
 import { useSettings, BrandTwoToneText } from '@/context/SettingsContext';
+import HeroParallaxBackground from '@/components/HeroParallaxBackground';
 
 export default function ClientLayout({
   children,
@@ -13,7 +14,7 @@ export default function ClientLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { systemName, systemLogo } = useSettings();
+  const { systemName, systemLogo, heroConfig } = useSettings();
   const [user, setUser] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -61,13 +62,12 @@ export default function ClientLayout({
   }
 
   return (
-    <div className="min-h-screen bg-[#030712] text-gray-100 flex flex-col selection:bg-red-600 selection:text-white">
-      {/* Background glow */}
-      <div className="pointer-events-none fixed -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[500px] bg-red-600/10 rounded-full blur-[140px] -z-10" />
-      <div className="pointer-events-none fixed bottom-0 right-0 w-[500px] h-[400px] bg-blue-600/5 rounded-full blur-[140px] -z-10" />
+    <div className="min-h-screen bg-[#030712] text-gray-100 flex flex-col selection:bg-red-600 selection:text-white relative overflow-x-hidden">
+      {/* Dynamic Netflix-Style Parallax Hero Background */}
+      <HeroParallaxBackground config={heroConfig} />
 
-      {/* Header */}
-      <header className="h-16 bg-gray-950/80 backdrop-blur-xl border-b border-gray-850 px-4 sm:px-8 flex items-center justify-between">
+      {/* Header Fijo */}
+      <header className="sticky top-0 z-50 h-16 bg-[#030712] border-b border-gray-800 px-4 sm:px-8 flex items-center justify-between shadow-xl">
         <div className="flex items-center gap-3">
           <Link href="/client/dashboard" className="flex items-center gap-2.5 group">
             <div
@@ -106,7 +106,7 @@ export default function ClientLayout({
 
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-800 hover:bg-gray-850 text-xs text-gray-300 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-800 hover:bg-gray-850 text-xs text-gray-300 transition-colors cursor-pointer bg-gray-900 shadow-sm"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Cerrar Sesión</span>
@@ -115,12 +115,12 @@ export default function ClientLayout({
       </header>
 
       {/* Contenido Principal */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="relative z-10 flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         {children}
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-gray-850/80 py-6 text-center text-xs text-gray-500">
+      <footer className="relative z-10 bg-[#030712] border-t border-gray-850 py-6 text-center text-xs text-gray-500">
         &copy; {new Date().getFullYear()} {systemName} • Soporte 24/7 con garantía extendida
       </footer>
     </div>

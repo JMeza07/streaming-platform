@@ -37,4 +37,16 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   descripcionVenta?: string;
+
+  @IsOptional()
+  @IsString()
+  clase?: string; // NUEVA, RENOVACION, GARANTIA
+
+  @IsOptional()
+  @IsString()
+  banco?: string; // Banco o pasarela (Nequi, Bancolombia, Daviplata, etc.)
+
+  @IsOptional()
+  @IsString()
+  aut?: string; // Código de autorización / comprobante
 }

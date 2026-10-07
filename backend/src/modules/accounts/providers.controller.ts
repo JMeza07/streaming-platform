@@ -17,6 +17,45 @@ export class ProvidersController {
     return this.providersService.getAll();
   }
 
+  // SRS REQ. ADICIONAL 9 (PUNTO 26): Autocompletado de proveedores
+  @Get('autocomplete')
+  getAutocomplete() {
+    return this.providersService.getAutocomplete();
+  }
+
+  // SRS RF-024 (PUNTO 17): Mejores tarifas por servicio
+  @Get('prices/best-rates')
+  getBestRates() {
+    return this.providersService.getBestRatesByService();
+  }
+
+  // SRS RF-024 (PUNTO 17): Lista de precios de proveedores
+  @Get('prices')
+  getPrices(
+    @Request() req: any,
+  ) {
+    const providerId = req.query?.providerId;
+    const serviceId = req.query?.serviceId;
+    return this.providersService.getPrices(providerId, serviceId);
+  }
+
+  // SRS RF-024 (PUNTO 17): Guardar precio de proveedor
+  @Post('prices')
+  @Roles(UserRole.ADMIN)
+  savePrice(
+    @Body() body: {
+      providerId: string;
+      serviceId?: string;
+      planId?: string;
+      precio: number;
+      duracionDias?: number;
+      moneda?: string;
+      notas?: string;
+    },
+  ) {
+    return this.providersService.savePrice(body);
+  }
+
   @Get(':id')
   getById(@Param('id') id: string) {
     return this.providersService.getById(id);

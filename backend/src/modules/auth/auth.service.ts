@@ -17,8 +17,13 @@ import {
   ToggleTwoFactorDto,
 } from './dto/two-factor.dto';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'crypto';
 import { UserRole, AuditCategory, AuditSeverity } from '@prisma/client';
 import { ALL_SYSTEM_MODULES } from '../users/users.service';
+
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutos (SRS RNF-S05)
+const REFRESH_TOKEN_EXPIRATION_DAYS = 30; // 30 días (SRS RNF-S06)
 
 @Injectable()
 export class AuthService {
@@ -34,9 +39,10 @@ export class AuthService {
     const rawWhatsapp = dto.whatsapp.trim();
     const cleanDigits = rawWhatsapp.replace(/[\s\-\+\(\)]/g, '');
 
-    // 1. Verificar si el WhatsApp ya existe en clientes o usuarios
+    // 1. Verificar si el WhatsApp ya existe en clientes activos
     const existingCustomer = await this.prisma.customer.findFirst({
       where: {
+        deletedAt: null,
         OR: [
           { whatsapp: rawWhatsapp },
           { whatsapp: cleanDigits },
@@ -49,9 +55,10 @@ export class AuthService {
       throw new ConflictException('Ya existe un cliente registrado con este número de WhatsApp');
     }
 
-    // 1.1 Verificar si el teléfono o correo ya pertenece a un usuario del sistema
+    // 1.1 Verificar si el teléfono o correo ya pertenece a un usuario activo del sistema
     const existingUser = await this.prisma.user.findFirst({
       where: {
+        deletedAt: null,
         OR: [
           { phone: rawWhatsapp },
           { phone: cleanDigits },
@@ -88,6 +95,7 @@ export class AuthService {
         phone: rawWhatsapp,
         rol: UserRole.CLIENTE,
         twoFactorEnabled: false,
+        lastActivityAt: new Date(),
         customer: {
           create: {
             whatsapp: rawWhatsapp,
@@ -113,26 +121,27 @@ export class AuthService {
       userAgent,
     });
 
-    // 4. Generar Token JWT
-    return this.generateToken(user);
+    // 4. Generar Token JWT y Refresh Token
+    return this.generateToken(user, ip, userAgent);
   }
 
-  // LOGIN CON REGLAS DE 2FA (Soporta Email, WhatsApp o Teléfono)
+  // LOGIN CON REGLAS DE 2FA, BLOQUEO POR INTENTOS Y REFRESH TOKENS (SRS RNF-S05 / RNF-S06)
   async login(dto: LoginDto, ip?: string, userAgent?: string) {
     const rawInput = dto.email ? dto.email.trim() : '';
     const cleanDigits = rawInput.replace(/[\s\-\+\(\)]/g, '');
 
-    // 1. Buscar usuario por email, phone directo en User, o whatsapp en Customer
+    // 1. Buscar usuario por email, phone directo en User, o whatsapp en Customer (solo activos y no borrados)
     const user = await this.prisma.user.findFirst({
       where: {
+        deletedAt: null,
         OR: [
           { email: { equals: rawInput, mode: 'insensitive' } },
           { phone: rawInput },
           { phone: cleanDigits },
           ...(cleanDigits.length >= 8 ? [{ phone: { contains: cleanDigits.slice(-10) } }] : []),
-          { customer: { whatsapp: rawInput } },
-          { customer: { whatsapp: cleanDigits } },
-          ...(cleanDigits.length >= 8 ? [{ customer: { whatsapp: { contains: cleanDigits.slice(-10) } } }] : []),
+          { customer: { whatsapp: rawInput, deletedAt: null } },
+          { customer: { whatsapp: cleanDigits, deletedAt: null } },
+          ...(cleanDigits.length >= 8 ? [{ customer: { whatsapp: { contains: cleanDigits.slice(-10) }, deletedAt: null } }] : []),
         ],
       },
       include: { customer: true, affiliate: true },
@@ -143,7 +152,7 @@ export class AuthService {
         accion: 'FALLO_INICIO_SESION',
         modulo: AuditCategory.AUTH,
         severidad: AuditSeverity.WARNING,
-        descripcion: `Intento de acceso fallido para: ${rawInput}`,
+        descripcion: `Intento de acceso fallido para usuario inexistente o inactivo: ${rawInput}`,
         exito: false,
         errorMensaje: 'Usuario no encontrado o suspendido',
         ip,
@@ -153,16 +162,16 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // 2. Validar contraseña
-    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash || '');
-    if (!isPasswordValid) {
+    // 1.1 Validar si la cuenta se encuentra temporalmente bloqueada (SRS RNF-S05)
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      const remainingMinutes = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
       await this.auditService.registrarEvento({
-        accion: 'FALLO_INICIO_SESION',
+        accion: 'INTENTO_ACCESO_CUENTA_BLOQUEADA',
         modulo: AuditCategory.AUTH,
         severidad: AuditSeverity.WARNING,
-        descripcion: `Contraseña incorrecta ingresada para usuario: ${user.email || user.phone} (${user.rol})`,
+        descripcion: `Intento de acceso a cuenta bloqueada por fuerza bruta: ${user.email || user.phone} (bloqueo vigente por ${remainingMinutes} min)`,
         exito: false,
-        errorMensaje: 'Contraseña no válida',
+        errorMensaje: `Cuenta bloqueada hasta ${user.lockedUntil.toISOString()}`,
         usuarioId: user.id,
         usuarioNombre: user.nombre,
         usuarioEmail: user.email,
@@ -170,13 +179,76 @@ export class AuthService {
         ip,
         userAgent,
       });
+      throw new UnauthorizedException(
+        `Cuenta bloqueada temporalmente por seguridad tras ${MAX_FAILED_ATTEMPTS} intentos fallidos. Intente nuevamente en ${remainingMinutes} minuto(s).`,
+      );
+    }
+
+    // 2. Validar contraseña
+    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash || '');
+    if (!isPasswordValid) {
+      const nextAttempts = (user.failedLoginAttempts || 0) + 1;
+      const isLockedNow = nextAttempts >= MAX_FAILED_ATTEMPTS;
+      const lockedUntil = isLockedNow ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: nextAttempts,
+          lastFailedLoginAt: new Date(),
+          lockedUntil,
+        },
+      });
+
+      await this.auditService.registrarEvento({
+        accion: isLockedNow ? 'BLOQUEO_CUENTA_FUERZA_BRUTA' : 'FALLO_INICIO_SESION',
+        modulo: AuditCategory.AUTH,
+        severidad: isLockedNow ? AuditSeverity.CRITICAL : AuditSeverity.WARNING,
+        descripcion: isLockedNow
+          ? `Cuenta BLOQUEADA por 15 minutos tras ${nextAttempts} intentos fallidos consecutivos: ${user.email || user.phone}`
+          : `Contraseña incorrecta ingresada para: ${user.email || user.phone} (Intento fallido ${nextAttempts}/${MAX_FAILED_ATTEMPTS})`,
+        exito: false,
+        errorMensaje: isLockedNow ? 'Cuenta bloqueada por 15 minutos' : 'Contraseña no válida',
+        usuarioId: user.id,
+        usuarioNombre: user.nombre,
+        usuarioEmail: user.email,
+        usuarioRol: user.rol,
+        ip,
+        userAgent,
+        detalles: { intentosFallidos: nextAttempts, bloqueado: isLockedNow },
+      });
+
+      if (isLockedNow) {
+        throw new UnauthorizedException(
+          `Cuenta bloqueada temporalmente por seguridad tras ${MAX_FAILED_ATTEMPTS} intentos fallidos. Intente de nuevo en 15 minutos.`,
+        );
+      }
+
       throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    // 2.1 Restablecer contador de intentos al ingresar exitosamente
+    if (user.failedLoginAttempts > 0 || user.lockedUntil !== null) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          lastFailedLoginAt: null,
+          lastActivityAt: new Date(),
+        },
+      });
+    } else {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { lastActivityAt: new Date() },
+      });
     }
 
     // 3. Manejo de 2FA
     if (user.twoFactorEnabled && user.twoFactorSecret) {
       if (dto.twoFactorCode && this.twoFactorService.verifyCode(dto.twoFactorCode, user.twoFactorSecret)) {
-        return this.generateToken(user);
+        return this.generateToken(user, ip, userAgent);
       }
 
       const tempToken = this.twoFactorService.generateTempToken({
@@ -210,7 +282,7 @@ export class AuthService {
       userAgent,
     });
 
-    return this.generateToken(user);
+    return this.generateToken(user, ip, userAgent);
   }
 
   // VALIDAR CÓDIGO 2FA DURANTE LOGIN
@@ -222,7 +294,7 @@ export class AuthService {
       include: { customer: true, affiliate: true },
     });
 
-    if (!user || !user.activo || !user.twoFactorSecret) {
+    if (!user || !user.activo || user.deletedAt !== null || !user.twoFactorSecret) {
       throw new UnauthorizedException('Usuario no válido o 2FA no configurado');
     }
 
@@ -258,7 +330,7 @@ export class AuthService {
       userAgent,
     });
 
-    return this.generateToken(user);
+    return this.generateToken(user, ip, userAgent);
   }
 
   // CONFIRMAR Y ACTIVAR CONFIGURACIÓN OBLIGATORIA 2FA (PRIMER LOGIN DE STAFF)
@@ -270,22 +342,21 @@ export class AuthService {
       include: { customer: true, affiliate: true },
     });
 
-    if (!user || !user.activo) {
+    if (!user || !user.activo || user.deletedAt !== null) {
       throw new UnauthorizedException('Usuario no válido o suspendido');
     }
 
-    // Validar el código de 6 dígitos contra el secreto proporcionado
     const isValid = this.twoFactorService.verifyCode(dto.code, dto.secret);
     if (!isValid) {
       throw new BadRequestException('El código ingresado no coincide con el autenticador. Verifica que la hora de tu móvil esté sincronizada.');
     }
 
-    // Guardar 2FA activo en base de datos
     const updatedUser = await this.prisma.user.update({
       where: { id: user.id },
       data: {
         twoFactorEnabled: true,
         twoFactorSecret: dto.secret,
+        lastActivityAt: new Date(),
       },
       include: { customer: true, affiliate: true },
     });
@@ -303,12 +374,12 @@ export class AuthService {
       userAgent,
     });
 
-    return this.generateToken(updatedUser);
+    return this.generateToken(updatedUser, ip, userAgent);
   }
 
   // INICIAR CONFIGURACIÓN DE 2FA VOLUNTARIA (Para clientes desde su panel)
   async generateUserTwoFactorSetup(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
     if (!user) throw new UnauthorizedException('Usuario no encontrado');
 
     const setupData = await this.twoFactorService.generateSecret(user.email);
@@ -322,18 +393,16 @@ export class AuthService {
 
   // ACTIVAR O DESACTIVAR 2FA (CLIENTES VOLUNTARIO / PROHIBIDO DESACTIVAR PARA STAFF)
   async toggleTwoFactor(userId: string, dto: ToggleTwoFactorDto, ip?: string, userAgent?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
     if (!user) throw new UnauthorizedException('Usuario no encontrado');
 
     const isMandatory = this.twoFactorService.is2FAMandatory(user.rol);
 
-    // Si es personal del sistema y trata de apagar el 2FA, SE PROHÍBE
     if (isMandatory && !dto.enable) {
       throw new ForbiddenException('La autenticación en dos pasos (Google Authenticator) es obligatoria e inmutable para usuarios administrativos.');
     }
 
     if (dto.enable) {
-      // Activar 2FA
       if (!dto.secret || !dto.code) {
         throw new BadRequestException('Se requiere la clave secreta y el código de verificación de 6 dígitos');
       }
@@ -348,6 +417,7 @@ export class AuthService {
         data: {
           twoFactorEnabled: true,
           twoFactorSecret: dto.secret,
+          lastActivityAt: new Date(),
         },
       });
 
@@ -366,7 +436,6 @@ export class AuthService {
 
       return { success: true, message: 'Autenticación en dos pasos (2FA) activada correctamente' };
     } else {
-      // Desactivar 2FA (solo clientes)
       if (!dto.code) {
         throw new BadRequestException('Debes ingresar tu código 2FA actual para confirmar la desactivación');
       }
@@ -381,6 +450,7 @@ export class AuthService {
         data: {
           twoFactorEnabled: false,
           twoFactorSecret: null,
+          lastActivityAt: new Date(),
         },
       });
 
@@ -401,6 +471,96 @@ export class AuthService {
     }
   }
 
+  // REFRESH TOKEN ROTATIVO (SRS RNF-S06)
+  async refreshToken(rawRefreshToken: string, ip?: string, userAgent?: string) {
+    if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
+      throw new UnauthorizedException('Token de actualización no proporcionado');
+    }
+
+    const tokenHash = createHash('sha256').update(rawRefreshToken).digest('hex');
+
+    const storedToken = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
+      include: {
+        user: {
+          include: { customer: true, affiliate: true },
+        },
+      },
+    });
+
+    if (!storedToken) {
+      throw new UnauthorizedException('Token de actualización inválido');
+    }
+
+    if (storedToken.revokedAt) {
+      // Posible intento de reuso de token comprometido -> Revocar toda la cadena del usuario por seguridad
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: storedToken.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+
+      await this.auditService.registrarEvento({
+        accion: 'REUSO_REFRESH_TOKEN_DETECTADO',
+        modulo: AuditCategory.AUTH,
+        severidad: AuditSeverity.CRITICAL,
+        descripcion: `Intento de reutilización de refresh token revocado para el usuario ${storedToken.user.email || storedToken.userId}. Se revocaron todas las sesiones activas.`,
+        usuarioId: storedToken.userId,
+        ip,
+        userAgent,
+      });
+
+      throw new UnauthorizedException('Sesión revocada por motivos de seguridad. Por favor inicie sesión nuevamente.');
+    }
+
+    if (storedToken.expiresAt < new Date()) {
+      throw new UnauthorizedException('La sesión ha expirado. Por favor inicie sesión nuevamente.');
+    }
+
+    if (!storedToken.user || !storedToken.user.activo || storedToken.user.deletedAt !== null) {
+      throw new UnauthorizedException('Usuario inactivo o no disponible.');
+    }
+
+    // Revocar el token actual (Rotación estricta)
+    await this.prisma.refreshToken.update({
+      where: { id: storedToken.id },
+      data: { revokedAt: new Date() },
+    });
+
+    // Actualizar última actividad
+    await this.prisma.user.update({
+      where: { id: storedToken.userId },
+      data: { lastActivityAt: new Date() },
+    });
+
+    // Generar nuevo par de tokens
+    return this.generateToken(storedToken.user, ip, userAgent);
+  }
+
+  // CERRAR SESIÓN / REVOCAR REFRESH TOKEN
+  async logout(rawRefreshToken?: string, userId?: string, ip?: string, userAgent?: string) {
+    if (rawRefreshToken) {
+      const tokenHash = createHash('sha256').update(rawRefreshToken).digest('hex');
+      await this.prisma.refreshToken.updateMany({
+        where: { tokenHash, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+
+    if (userId) {
+      await this.auditService.registrarEvento({
+        accion: 'CIERRE_SESION',
+        modulo: AuditCategory.AUTH,
+        severidad: AuditSeverity.INFO,
+        descripcion: `Cierre de sesión para el usuario ID ${userId}`,
+        usuarioId: userId,
+        ip,
+        userAgent,
+      });
+    }
+
+    return { success: true, message: 'Sesión cerrada correctamente' };
+  }
+
   // BUSCAR CUENTA POR CORREO (Endpoint público — exposición mínima)
   async lookupEmail(email: string) {
     if (!email) {
@@ -408,8 +568,8 @@ export class AuthService {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({
-      where: { email: normalizedEmail },
+    const user = await this.prisma.user.findFirst({
+      where: { email: normalizedEmail, deletedAt: null },
       select: { activo: true, rol: true },
     });
 
@@ -423,8 +583,8 @@ export class AuthService {
     };
   }
 
-  // GENERADOR DE TOKEN FINAL
-  private generateToken(user: any) {
+  // GENERADOR DE ACCESS TOKEN (8H) + REFRESH TOKEN ROTATIVO (30D)
+  private async generateToken(user: any, ip?: string, userAgent?: string) {
     const payload = {
       sub: user.id,
       email: user.email || user.phone || 'usuario@stream.com',
@@ -434,10 +594,28 @@ export class AuthService {
 
     const token = this.jwtService.sign(payload);
 
+    // Generar refresh token criptográficamente seguro
+    const rawRefreshToken = randomBytes(40).toString('hex');
+    const tokenHash = createHash('sha256').update(rawRefreshToken).digest('hex');
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRATION_DAYS * 24 * 60 * 60 * 1000);
+
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+        ip: ip || null,
+        userAgent: userAgent || null,
+      },
+    });
+
     return {
       access_token: token,
-      accessToken: token, // Compatible con ambos estándares de frontend y PWA
+      accessToken: token, // Compatible con frontend Next.js y PWA
       token: token,
+      refresh_token: rawRefreshToken,
+      refreshToken: rawRefreshToken,
+      expiresIn: '8h',
       user: {
         id: user.id,
         nombre: user.nombre,

@@ -2,6 +2,8 @@ import { Controller, Get, Post, Body, Param, Query, UseGuards, Patch, Delete, Re
 import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { ImportAccountsDto } from './dto/import-accounts.dto';
+import { AddToCemeteryDto } from './dto/cemetery.dto';
+import { RenewRootAccountDto } from './dto/renew-root-account.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -32,6 +34,13 @@ export class AccountsController {
   @Roles(UserRole.ADMIN, UserRole.SOPORTE)
   getBillingMismatches() {
     return this.accountsService.checkBillingCycleMismatches();
+  }
+
+  // CONTROL DE FACTURACIÓN CON PROVEEDORES (SRS RF-031 / Punto 22)
+  @Get('billing-alerts')
+  @Roles(UserRole.ADMIN, UserRole.SOPORTE)
+  getBillingAlerts(@Query('dias') dias?: string) {
+    return this.accountsService.getBillingAlerts(dias ? parseInt(dias, 10) : 5);
   }
 
   // =========================================================================
@@ -128,6 +137,23 @@ export class AccountsController {
     return this.accountsService.optimizeInventory({ autoMigrate: body?.autoMigrate ?? false });
   }
 
+  // RENOVACIÓN DE CUENTAS MATRICES (SRS Req. Adicional 10 / Punto 18)
+  @Post('root-accounts/:id/renew')
+  @Roles(UserRole.ADMIN)
+  renewRootAccount(
+    @Param('id') id: string,
+    @Body() dto: RenewRootAccountDto,
+    @Request() req: any,
+  ) {
+    return this.accountsService.renewRootAccount(id, dto, req.user);
+  }
+
+  @Get('root-accounts/:id/renewals')
+  @Roles(UserRole.ADMIN, UserRole.SOPORTE)
+  getRootAccountRenewals(@Param('id') id: string) {
+    return this.accountsService.getRootAccountRenewals(id);
+  }
+
   // =========================================================================
   // GESTIÓN GENERAL DE PERFILES / PANTALLAS
   // =========================================================================
@@ -178,6 +204,55 @@ export class AccountsController {
     },
   ) {
     return this.accountsService.update(id, dto);
+  }
+
+  // =========================================================================
+  // HISTORIAL DE CAMBIOS DE CLAVE (SRS SGVS RF-010)
+  // =========================================================================
+  @Get('password-changes')
+  @Roles(UserRole.ADMIN, UserRole.SOPORTE)
+  getPasswordChanges(
+    @Query('rootAccountId') rootAccountId?: string,
+    @Query('accountId') accountId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.accountsService.getPasswordHistory({
+      rootAccountId,
+      accountId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  // =========================================================================
+  // CEMENTERIO DE CUENTAS / LISTA NEGRA (SRS SGVS RF-027, RF-035, RF-011)
+  // =========================================================================
+  @Get('cemetery')
+  @Roles(UserRole.ADMIN, UserRole.SOPORTE)
+  getCemetery(
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.accountsService.getCemeteryAccounts(
+      search,
+      page ? parseInt(page, 10) : 1,
+      limit ? parseInt(limit, 10) : 50,
+    );
+  }
+
+  @Post('cemetery')
+  @Roles(UserRole.ADMIN)
+  addToCemetery(
+    @Body() dto: AddToCemeteryDto,
+    @Request() req: any,
+  ) {
+    return this.accountsService.addToCemetery(dto, req.user);
+  }
+
+  @Delete('cemetery/:id')
+  @Roles(UserRole.ADMIN)
+  removeFromCemetery(@Param('id') id: string, @Request() req: any) {
+    return this.accountsService.removeFromCemetery(id, req.user);
   }
 
   @Delete(':id')

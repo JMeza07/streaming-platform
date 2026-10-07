@@ -1,13 +1,67 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAuditLogDto } from './dto/create-audit.dto';
 import { AuditCategory, AuditSeverity, Prisma } from '@prisma/client';
 
+/** Claves cuyo valor nunca debe quedar en el log de auditoría. */
+const REDACTED_KEYS = /^(password|passwordHash|passwordCuenta|pinPerfil|assignedPin|imapPassword|twoFactorSecret|token|refreshToken|tokenHash)$/i;
+
 @Injectable()
-export class AuditService {
+export class AuditService implements OnModuleInit {
   private readonly logger = new Logger(AuditService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * SRS RNF-S08: los logs de auditoría no pueden modificarse ni eliminarse por ningún usuario,
+   * incluido el administrador. Se garantiza a nivel de base de datos con un trigger idempotente.
+   */
+  async onModuleInit() {
+    try {
+      await this.prisma.$executeRawUnsafe(`
+        CREATE OR REPLACE FUNCTION audit_logs_inmutable() RETURNS trigger AS $$
+        BEGIN
+          RAISE EXCEPTION 'audit_logs es inmutable: operación % no permitida', TG_OP;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+      await this.prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_audit_logs_no_update_delete ON audit_logs;`);
+      await this.prisma.$executeRawUnsafe(`
+        CREATE TRIGGER trg_audit_logs_no_update_delete
+        BEFORE UPDATE OR DELETE ON audit_logs
+        FOR EACH ROW EXECUTE FUNCTION audit_logs_inmutable();
+      `);
+      await this.prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_audit_logs_no_truncate ON audit_logs;`);
+      await this.prisma.$executeRawUnsafe(`
+        CREATE TRIGGER trg_audit_logs_no_truncate
+        BEFORE TRUNCATE ON audit_logs
+        FOR EACH STATEMENT EXECUTE FUNCTION audit_logs_inmutable();
+      `);
+      this.logger.log('🛡️  Protección de inmutabilidad de audit_logs activa');
+    } catch (err: any) {
+      this.logger.error(`No se pudo instalar la protección de audit_logs: ${err.message}`);
+    }
+  }
+
+  /** Enmascara recursivamente datos sensibles antes de persistirlos. */
+  private sanitize(value: any, depth = 0): any {
+    if (value === null || value === undefined || depth > 6) return value;
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map((v) => this.sanitize(v, depth + 1));
+    if (typeof value === 'object') {
+      const out: Record<string, any> = {};
+      for (const [k, v] of Object.entries(value)) {
+        out[k] = REDACTED_KEYS.test(k) ? (v ? '***' : v) : this.sanitize(v, depth + 1);
+      }
+      return out;
+    }
+    if (typeof value === 'bigint') return value.toString();
+    return value;
+  }
+
+  private toJson(value: any) {
+    return value ? (this.sanitize(value) as Prisma.InputJsonValue) : Prisma.JsonNull;
+  }
 
   /**
    * Registra un evento de auditoría de forma segura y asíncrona.
@@ -21,7 +75,9 @@ export class AuditService {
           modulo: data.modulo || AuditCategory.SISTEMA,
           severidad: data.severidad || AuditSeverity.INFO,
           descripcion: data.descripcion,
-          detalles: data.detalles ? (data.detalles as Prisma.InputJsonValue) : Prisma.JsonNull,
+          detalles: this.toJson(data.detalles),
+          valoresAnteriores: this.toJson(data.valoresAnteriores),
+          valoresNuevos: this.toJson(data.valoresNuevos),
           ip: data.ip || null,
           userAgent: data.userAgent || null,
           entidadTipo: data.entidadTipo || data.entidad || null,

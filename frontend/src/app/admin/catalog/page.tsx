@@ -20,6 +20,13 @@ import {
   HelpCircle,
   ShieldAlert,
   Percent,
+  Package,
+  MessageSquare,
+  Copy,
+  Check,
+  Lock,
+  Unlock,
+  Send,
 } from 'lucide-react';
 import { exportToCSV, triggerPrintReport, ColumnDef } from '@/lib/exportUtils';
 import TablePagination from '@/components/TablePagination';
@@ -40,27 +47,37 @@ export default function CatalogPage() {
     return services.slice(start, start + ITEMS_PER_PAGE);
   }, [services, currentPage]);
 
+  const [activeTab, setActiveTab] = useState<'services' | 'combos' | 'templates'>('services');
+  const [combos, setCombos] = useState<any[]>([]);
+  const [templateCatalog, setTemplateCatalog] = useState<any | null>(null);
+  const [loadingTemplate, setLoadingTemplate] = useState(false);
+  const [copiedTemplate, setCopiedTemplate] = useState(false);
+
   // Modales de creación
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
+  const [showComboModal, setShowComboModal] = useState(false);
 
   // Modales de edición y eliminación
   const [editingService, setEditingService] = useState<any | null>(null);
   const [serviceToDelete, setServiceToDelete] = useState<any | null>(null);
   const [editingPlan, setEditingPlan] = useState<any | null>(null);
   const [planToDelete, setPlanToDelete] = useState<any | null>(null);
+  const [comboToDelete, setComboToDelete] = useState<any | null>(null);
 
   // Formularios
   const [newService, setNewService] = useState({
     nombre: '',
     logoUrl: '',
     descripcion: '',
+    usaPin: true,
   });
 
   const [editServiceForm, setEditServiceForm] = useState({
     nombre: '',
     logoUrl: '',
     descripcion: '',
+    usaPin: true,
   });
 
   const [newPlan, setNewPlan] = useState({
@@ -81,6 +98,18 @@ export default function CatalogPage() {
     pantallasSimultaneas: 1,
     duracionDias: 30,
     garantiaDias: 30,
+  });
+
+  const [newCombo, setNewCombo] = useState<{
+    nombre: string;
+    descripcion: string;
+    precioCombo: string;
+    items: Array<{ planId: string; cantidad: number }>;
+  }>({
+    nombre: '',
+    descripcion: '',
+    precioCombo: '',
+    items: [{ planId: '', cantidad: 1 }, { planId: '', cantidad: 1 }],
   });
 
   // Calculadora de Precios basada en Manual Operativo (Costo Raíz + Tasa de Riesgo Caída + Margen Deseado)
@@ -132,12 +161,14 @@ export default function CatalogPage() {
   const fetchCatalog = async () => {
     try {
       setLoading(true);
-      const [sRes, pRes] = await Promise.all([
+      const [sRes, pRes, cRes] = await Promise.all([
         api.get('/services'),
         api.get('/plans'),
+        api.get('/combos?all=true').catch(() => ({ data: [] })),
       ]);
       setServices(sRes.data);
       setPlans(pRes.data);
+      setCombos(cRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -145,9 +176,27 @@ export default function CatalogPage() {
     }
   };
 
+  const fetchTemplateCatalog = async () => {
+    try {
+      setLoadingTemplate(true);
+      const res = await api.get('/services/templates/catalog');
+      setTemplateCatalog(res.data);
+    } catch (err) {
+      console.error('Error cargando plantilla de precios:', err);
+    } finally {
+      setLoadingTemplate(false);
+    }
+  };
+
   useEffect(() => {
     fetchCatalog();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'templates') {
+      fetchTemplateCatalog();
+    }
+  }, [activeTab]);
 
   const openEditService = (service: any) => {
     setEditingService(service);
@@ -155,6 +204,7 @@ export default function CatalogPage() {
       nombre: service.nombre || '',
       logoUrl: service.logoUrl || '',
       descripcion: service.descripcion || '',
+      usaPin: service.usaPin !== false,
     });
     setFormError('');
   };
@@ -257,7 +307,7 @@ export default function CatalogPage() {
     try {
       await api.post('/services', newService);
       setShowServiceModal(false);
-      setNewService({ nombre: '', logoUrl: '', descripcion: '' });
+      setNewService({ nombre: '', logoUrl: '', descripcion: '', usaPin: true });
       setSuccessMsg('¡Plataforma creada exitosamente!');
       setTimeout(() => setSuccessMsg(''), 3000);
       fetchCatalog();
@@ -299,6 +349,97 @@ export default function CatalogPage() {
     } finally {
       setFormLoading(false);
     }
+  };
+
+  // =========================================================================
+  // SRS RF-006 (PUNTO 15): LÓGICA DE COMBOS MULTI-PLATAFORMA
+  // =========================================================================
+  const computedComboRegularTotal = useMemo(() => {
+    let total = 0;
+    newCombo.items.forEach((item) => {
+      if (!item.planId) return;
+      const plan = plans.find((p) => p.id === item.planId);
+      if (plan) total += Number(plan.precio) * (item.cantidad || 1);
+    });
+    return total;
+  }, [newCombo.items, plans]);
+
+  const computedComboDiscount = useMemo(() => {
+    const regular = computedComboRegularTotal;
+    const comboPrice = Number(newCombo.precioCombo) || 0;
+    if (regular <= 0 || comboPrice <= 0) return { ahorro: 0, porcentaje: 0, isValid: true };
+    const ahorro = regular - comboPrice;
+    const porcentaje = regular > 0 ? (ahorro / regular) * 100 : 0;
+    return {
+      ahorro,
+      porcentaje: Math.round(porcentaje),
+      isValid: comboPrice < regular,
+    };
+  }, [computedComboRegularTotal, newCombo.precioCombo]);
+
+  const handleCreateCombo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validItems = newCombo.items.filter((i) => i.planId);
+    if (validItems.length < 2) {
+      await alert('Un combo promocional debe incluir al menos 2 planes o plataformas diferentes.', { type: 'warning' });
+      return;
+    }
+    const comboPrice = Number(newCombo.precioCombo);
+    if (comboPrice >= computedComboRegularTotal) {
+      await alert(
+        `El precio del combo ($${comboPrice.toLocaleString('es-CO')}) debe ser estrictamente menor que la suma de sus precios individuales ($${computedComboRegularTotal.toLocaleString('es-CO')}) para garantizar el ahorro al cliente.`,
+        { type: 'error', title: 'Precio Inválido' }
+      );
+      return;
+    }
+
+    setFormLoading(true);
+    setFormError('');
+    try {
+      await api.post('/combos', {
+        nombre: newCombo.nombre,
+        descripcion: newCombo.descripcion,
+        precioCombo: comboPrice,
+        items: validItems,
+      });
+      setShowComboModal(false);
+      setNewCombo({
+        nombre: '',
+        descripcion: '',
+        precioCombo: '',
+        items: [{ planId: '', cantidad: 1 }, { planId: '', cantidad: 1 }],
+      });
+      setSuccessMsg('¡Combo promocional creado exitosamente!');
+      setTimeout(() => setSuccessMsg(''), 3000);
+      fetchCatalog();
+    } catch (err: any) {
+      setFormError(err.response?.data?.message || 'Error al crear el combo');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleDeleteCombo = async () => {
+    if (!comboToDelete) return;
+    setFormLoading(true);
+    try {
+      await api.delete(`/combos/${comboToDelete.id}`);
+      setComboToDelete(null);
+      setSuccessMsg('¡Combo eliminado exitosamente!');
+      setTimeout(() => setSuccessMsg(''), 3000);
+      fetchCatalog();
+    } catch (err: any) {
+      await alert(err.response?.data?.message || 'No se pudo eliminar el combo', { type: 'error' });
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleCopyTemplate = () => {
+    if (!templateCatalog?.templateText) return;
+    navigator.clipboard.writeText(templateCatalog.templateText);
+    setCopiedTemplate(true);
+    setTimeout(() => setCopiedTemplate(false), 3000);
   };
 
   const formatCOP = (amount: any) => {
@@ -376,24 +517,82 @@ export default function CatalogPage() {
             <Download className="w-3.5 h-3.5" />
             <span>Exportar CSV</span>
           </button>
-          <button
-            onClick={() => {
-              setNewPlan({ ...newPlan, serviceId: services[0]?.id || '' });
-              setShowPlanModal(true);
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-gray-900 hover:bg-gray-850 text-xs font-semibold text-gray-300 rounded-xl border border-gray-800 transition-all cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5 text-gray-400" />
-            <span>Nuevo Plan</span>
-          </button>
-          <button
-            onClick={() => setShowServiceModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-500 text-xs font-semibold text-white rounded-xl shadow-lg shadow-red-600/20 transition-all cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Nueva Plataforma</span>
-          </button>
+          {activeTab === 'combos' && (
+            <button
+              onClick={() => setShowComboModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-xs font-semibold text-white rounded-xl shadow-lg shadow-purple-950/40 transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Nuevo Combo</span>
+            </button>
+          )}
+          {activeTab === 'services' && (
+            <>
+              <button
+                onClick={() => {
+                  setNewPlan({ ...newPlan, serviceId: services[0]?.id || '' });
+                  setShowPlanModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-gray-900 hover:bg-gray-850 text-xs font-semibold text-gray-300 rounded-xl border border-gray-800 transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-gray-400" />
+                <span>Nuevo Plan</span>
+              </button>
+              <button
+                onClick={() => setShowServiceModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-500 text-xs font-semibold text-white rounded-xl shadow-lg shadow-red-600/20 transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nueva Plataforma</span>
+              </button>
+            </>
+          )}
         </div>
+      </div>
+
+      {/* Tabs Navigation */}
+      <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
+        <button
+          onClick={() => setActiveTab('services')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'services'
+              ? 'bg-red-600/20 text-red-400 border border-red-500/30'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          <Film className="w-4 h-4" />
+          <span>Plataformas & Planes ({services.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('combos')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'combos'
+              ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          <Package className="w-4 h-4" />
+          <span>Combos de Plataformas ({combos.length})</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-semibold">
+            Multi-Servicio
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('templates')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'templates'
+              ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span>Plantillas WhatsApp (Catálogo Vivo)</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">
+            Dinámico
+          </span>
+        </button>
       </div>
 
       {successMsg && (
@@ -402,156 +601,317 @@ export default function CatalogPage() {
         </div>
       )}
 
-      {/* Grid de Plataformas y Planes */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {paginatedServices.map((service) => {
-          const servicePlans = plans.filter((p) => p.serviceId === service.id);
+      {/* ================= PESTAÑA 1: PLATAFORMAS & PLANES ================= */}
+      {activeTab === 'services' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {paginatedServices.map((service) => {
+              const servicePlans = plans.filter((p) => p.serviceId === service.id);
 
-          return (
-            <div
-              key={service.id}
-              className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-6 backdrop-blur-md space-y-4 hover:border-gray-700 transition-all flex flex-col justify-between"
-            >
-              <div>
-                {/* Cabecera del servicio */}
-                <div className="flex items-start justify-between gap-4 pb-4 border-b border-gray-800">
-                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                    {service.logoUrl ? (
-                      <img
-                        src={service.logoUrl}
-                        alt={service.nombre}
-                        className="w-9 h-9 object-contain rounded-lg shrink-0 bg-black/40 p-1 mt-0.5"
-                      />
-                    ) : (
-                      <div className="w-9 h-9 rounded-lg bg-red-950 flex items-center justify-center font-bold text-red-400 shrink-0 mt-0.5">
-                        {service.nombre.substring(0, 2)}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-bold text-white">{service.nombre}</h3>
-                      {service.descripcion && (
-                        <p className="text-xs text-gray-400 mt-0.5 leading-relaxed break-words">
-                          {service.descripcion}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {service.stockDisponibleTotal !== undefined && (
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                        service.stockDisponibleTotal > 0
-                          ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40'
-                          : 'bg-red-950/70 text-red-400 border-red-800/40'
-                      }`}>
-                        {service.stockDisponibleTotal} {service.stockDisponibleTotal === 1 ? 'cuenta libre' : 'cuentas libres'}
-                      </span>
-                    )}
-                    <span className="text-[11px] font-semibold bg-red-950/70 text-red-400 border border-red-800/40 px-2 py-0.5 rounded-full">
-                      {servicePlans.length} {servicePlans.length === 1 ? 'plan' : 'planes'}
-                    </span>
-                    <button
-                      onClick={() => openEditService(service)}
-                      data-tooltip="Editar plataforma"
-                      className="p-1.5 rounded-lg border border-gray-800 hover:bg-gray-800 text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setServiceToDelete(service)}
-                      data-tooltip="Eliminar plataforma"
-                      className="p-1.5 rounded-lg border border-gray-800 hover:bg-red-950/40 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Lista de planes */}
-                <div className="space-y-2.5 pt-4">
-                  {servicePlans.length === 0 ? (
-                    <p className="text-xs text-gray-500 italic py-2">
-                      Sin planes creados. Agrega un plan para este servicio.
-                    </p>
-                  ) : (
-                    servicePlans.map((plan) => (
-                      <div
-                        key={plan.id}
-                        className="p-3 bg-gray-950/50 border border-gray-800 rounded-xl flex items-center justify-between text-xs hover:border-gray-750 transition-colors"
-                      >
-                        <div className="space-y-0.5">
+              return (
+                <div
+                  key={service.id}
+                  className="bg-gray-900/60 border border-gray-800/80 rounded-2xl p-6 backdrop-blur-md space-y-4 hover:border-gray-700 transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    {/* Cabecera del servicio */}
+                    <div className="flex items-start justify-between gap-4 pb-4 border-b border-gray-800">
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        {service.logoUrl ? (
+                          <img
+                            src={service.logoUrl}
+                            alt={service.nombre}
+                            className="w-9 h-9 object-contain rounded-lg shrink-0 bg-black/40 p-1 mt-0.5"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-lg bg-red-950 flex items-center justify-center font-bold text-red-400 shrink-0 mt-0.5">
+                            {service.nombre.substring(0, 2)}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <p className="font-semibold text-white">{plan.nombrePlan}</p>
-                            {plan.stockDisponible !== undefined && plan.stockDisponible <= 0 ? (
-                              <span className="px-2 py-0.5 rounded-md bg-red-950/80 border border-red-800 text-red-400 font-extrabold text-[9px] uppercase tracking-wider animate-pulse">
-                                Stock: 0 (Agotado)
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-md bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 font-semibold text-[9px]">
-                                Stock: {plan.stockDisponible !== undefined ? plan.stockDisponible : '—'} disp.
+                            <h3 className="text-base font-bold text-white">{service.nombre}</h3>
+                            {service.usaPin === false && (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-950/60 text-sky-400 border border-sky-800/40 flex items-center gap-1">
+                                <Unlock className="w-2.5 h-2.5" /> Sin PIN
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 text-[10px] text-gray-400">
-                            <span>{plan.resolucion || 'FHD'}</span>
-                            <span>•</span>
-                            <span>{plan.pantallasSimultaneas} pantalla(s)</span>
-                            <span>•</span>
-                            <span>{plan.duracionDias} días</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2.5">
-                          <div className="text-right">
-                            <p className="font-bold text-white text-sm">{formatCOP(plan.precio)}</p>
-                            <span className="text-[10px] text-emerald-400">
-                              Garantía: {plan.garantiaDias}d
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1 border-l border-gray-800 pl-2">
-                            <button
-                              onClick={() => openEditPlan(plan)}
-                              data-tooltip="Editar plan"
-                              className="p-1.5 rounded-lg border border-gray-800 hover:bg-gray-800 text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={() => setPlanToDelete(plan)}
-                              data-tooltip="Eliminar plan"
-                              className="p-1.5 rounded-lg border border-gray-800 hover:bg-red-950/40 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
+                          {service.descripcion && (
+                            <p className="text-xs text-gray-400 mt-0.5 leading-relaxed break-words">
+                              {service.descripcion}
+                            </p>
+                          )}
                         </div>
                       </div>
-                    ))
-                  )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {service.stockDisponibleTotal !== undefined && (
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                            service.stockDisponibleTotal > 0
+                              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40'
+                              : 'bg-red-950/70 text-red-400 border-red-800/40'
+                          }`}>
+                            {service.stockDisponibleTotal} {service.stockDisponibleTotal === 1 ? 'cuenta libre' : 'cuentas libres'}
+                          </span>
+                        )}
+                        <span className="text-[11px] font-semibold bg-red-950/70 text-red-400 border border-red-800/40 px-2 py-0.5 rounded-full">
+                          {servicePlans.length} {servicePlans.length === 1 ? 'plan' : 'planes'}
+                        </span>
+                        <button
+                          onClick={() => openEditService(service)}
+                          data-tooltip="Editar plataforma"
+                          className="p-1.5 rounded-lg border border-gray-800 hover:bg-gray-800 text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setServiceToDelete(service)}
+                          data-tooltip="Eliminar plataforma"
+                          className="p-1.5 rounded-lg border border-gray-800 hover:bg-red-950/40 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Lista de planes */}
+                    <div className="space-y-2.5 pt-4">
+                      {servicePlans.length === 0 ? (
+                        <p className="text-xs text-gray-500 italic py-2">
+                          Sin planes creados. Agrega un plan para este servicio.
+                        </p>
+                      ) : (
+                        servicePlans.map((plan) => (
+                          <div
+                            key={plan.id}
+                            className="p-3 bg-gray-950/50 border border-gray-800 rounded-xl flex items-center justify-between text-xs hover:border-gray-750 transition-colors"
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <p className="font-semibold text-white">{plan.nombrePlan}</p>
+                                {plan.stockDisponible !== undefined && plan.stockDisponible <= 0 ? (
+                                  <span className="px-2 py-0.5 rounded-md bg-red-950/80 border border-red-800 text-red-400 font-extrabold text-[9px] uppercase tracking-wider animate-pulse">
+                                    Stock: 0 (Agotado)
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 font-semibold text-[9px]">
+                                    Stock: {plan.stockDisponible !== undefined ? plan.stockDisponible : '—'} disp.
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                                <span>{plan.resolucion || 'FHD'}</span>
+                                <span>•</span>
+                                <span>{plan.pantallasSimultaneas} pantalla(s)</span>
+                                <span>•</span>
+                                <span>{plan.duracionDias} días</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2.5">
+                              <div className="text-right">
+                                <p className="font-bold text-white text-sm">{formatCOP(plan.precio)}</p>
+                                <span className="text-[10px] text-emerald-400">
+                                  Garantía: {plan.garantiaDias}d
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 border-l border-gray-800 pl-2">
+                                <button
+                                  onClick={() => openEditPlan(plan)}
+                                  data-tooltip="Editar plan"
+                                  className="p-1.5 rounded-lg border border-gray-800 hover:bg-gray-800 text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => setPlanToDelete(plan)}
+                                  data-tooltip="Eliminar plan"
+                                  className="p-1.5 rounded-lg border border-gray-800 hover:bg-red-950/40 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-gray-850">
+                    <button
+                      onClick={() => {
+                        setNewPlan({ ...newPlan, serviceId: service.id });
+                        setShowPlanModal(true);
+                      }}
+                      className="w-full py-2 bg-gray-950 hover:bg-gray-850 border border-gray-800 text-gray-300 hover:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-red-500" />
+                      <span>Agregar Plan a {service.nombre}</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              );
+            })}
+          </div>
 
-              <div className="pt-3 border-t border-gray-850">
-                <button
-                  onClick={() => {
-                    setNewPlan({ ...newPlan, serviceId: service.id });
-                    setShowPlanModal(true);
-                  }}
-                  className="w-full py-2 bg-gray-950 hover:bg-gray-850 border border-gray-800 text-gray-300 hover:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5 text-red-500" />
-                  <span>Agregar Plan a {service.nombre}</span>
-                </button>
-              </div>
+          <TablePagination
+            currentPage={currentPage}
+            totalItems={services.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
+        </>
+      )}
+
+      {/* ================= PESTAÑA 2: COMBOS DE PLATAFORMAS ================= */}
+      {activeTab === 'combos' && (
+        <div className="space-y-6">
+          {combos.length === 0 ? (
+            <div className="bg-gray-900/60 border border-purple-900/40 rounded-2xl p-12 text-center space-y-4">
+              <Package className="w-12 h-12 text-purple-400 mx-auto opacity-70" />
+              <h3 className="text-base font-bold text-white">No hay Combos Registrados</h3>
+              <p className="text-xs text-gray-400 max-w-md mx-auto">
+                Crea paquetes multi-servicio (ej. Dúo Netflix + Disney+) con tarifas atractivas asegurando ahorro real respecto a la compra individual.
+              </p>
+              <button
+                onClick={() => setShowComboModal(true)}
+                className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-xs font-bold text-white rounded-xl shadow-lg shadow-purple-950/40"
+              >
+                Crear Primer Combo
+              </button>
             </div>
-          );
-        })}
-      </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {combos.map((combo) => (
+                <div
+                  key={combo.id}
+                  className="bg-gray-900/60 border border-purple-900/30 rounded-2xl p-6 backdrop-blur-md space-y-4 hover:border-purple-600/50 transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-3 pb-3 border-b border-gray-800">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          Combo Promocional
+                        </span>
+                        <h3 className="text-base font-bold text-white mt-1.5">{combo.nombre}</h3>
+                        {combo.descripcion && (
+                          <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">
+                            {combo.descripcion}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setComboToDelete(combo)}
+                        className="p-1.5 rounded-lg border border-gray-800 hover:bg-red-950/40 text-red-400 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
 
-      <TablePagination
-        currentPage={currentPage}
-        totalItems={services.length}
-        itemsPerPage={ITEMS_PER_PAGE}
-        onPageChange={setCurrentPage}
-      />
+                    {/* Plataformas Incluidas */}
+                    <div className="space-y-2 pt-3">
+                      <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                        Plataformas Incluidas:
+                      </div>
+                      <div className="space-y-1.5">
+                        {combo.items?.map((item: any) => (
+                          <div
+                            key={item.id}
+                            className="p-2 rounded-xl bg-gray-950/60 border border-gray-800 flex items-center justify-between text-xs"
+                          >
+                            <span className="font-semibold text-white">
+                              {item.serviceNombre} ({item.planNombre})
+                            </span>
+                            <span className="text-gray-400 text-[11px]">
+                              ${Number(item.precioUnitario).toLocaleString('es-CO')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Resumen de Precios y Descuento */}
+                  <div className="pt-3 border-t border-gray-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-400 line-through">
+                        Suma regular: ${Number(combo.precioRegularTotal).toLocaleString('es-CO')}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">
+                        Ahorro: {Number(combo.descuentoPorcentaje || 0).toFixed(0)}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-purple-300">Precio Combo:</span>
+                      <span className="text-lg font-bold text-white">
+                        ${Number(combo.precioCombo).toLocaleString('es-CO')} COP
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-gray-400 flex items-center justify-between pt-1">
+                      <span>Disponibilidad actual:</span>
+                      <span className={`font-bold ${combo.stockDisponible > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {combo.stockDisponible > 0 ? `${combo.stockDisponible} combo(s) armables` : 'Sin stock conjunto'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================= PESTAÑA 3: PLANTILLAS OFICIALES WHATSAPP ================= */}
+      {activeTab === 'templates' && (
+        <div className="bg-gray-900/60 border border-emerald-900/30 rounded-2xl p-6 backdrop-blur-md space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-800">
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-emerald-400" />
+                <span>Lista Oficial de Precios para WhatsApp</span>
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Generada en tiempo real conectada a la base de datos con plataformas, resoluciones y combos activos.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyTemplate}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+              >
+                {copiedTemplate ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                <span>{copiedTemplate ? '¡Copiado!' : 'Copiar Catálogo'}</span>
+              </button>
+              <button
+                onClick={() => {
+                  const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(templateCatalog?.templateText || '')}`;
+                  window.open(url, '_blank');
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-950/40 transition-all cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                <span>Enviar por WhatsApp</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="relative">
+            {loadingTemplate ? (
+              <div className="h-64 flex flex-col items-center justify-center bg-gray-950/80 rounded-xl border border-gray-850">
+                <Loader2 className="w-8 h-8 text-emerald-400 animate-spin mb-2" />
+                <span className="text-xs text-gray-400">Compilando catálogo de precios en tiempo real...</span>
+              </div>
+            ) : (
+              <textarea
+                readOnly
+                rows={16}
+                value={templateCatalog?.templateText || ''}
+                className="w-full bg-gray-950/90 border border-gray-800 rounded-xl p-4 text-xs font-mono text-emerald-200/90 leading-relaxed outline-none resize-none shadow-inner"
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* MODAL: NUEVA PLATAFORMA */}
       {showServiceModal && (
@@ -602,6 +962,24 @@ export default function CatalogPage() {
                   onChange={(e) => setNewService({ ...newService, descripcion: e.target.value })}
                   placeholder="Breve descripción del catálogo..."
                   className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-red-600"
+                />
+              </div>
+
+              <div className="p-3 bg-gray-950 border border-gray-800 rounded-xl flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-white flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Requiere PIN por Perfil (SRS Req. 2)</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    Desmarca si la plataforma no utiliza PIN de perfil (ej. Spotify, Prime Video, etc.).
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={newService.usaPin}
+                  onChange={(e) => setNewService({ ...newService, usaPin: e.target.checked })}
+                  className="w-4 h-4 accent-red-600 rounded cursor-pointer"
                 />
               </div>
 
@@ -913,6 +1291,24 @@ export default function CatalogPage() {
                   onChange={(e) => setEditServiceForm({ ...editServiceForm, descripcion: e.target.value })}
                   placeholder="Breve descripción del catálogo..."
                   className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              <div className="p-3 bg-gray-950 border border-gray-800 rounded-xl flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-white flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Requiere PIN por Perfil (SRS Req. 2)</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    Desmarca si la plataforma no utiliza PIN de perfil (ej. Spotify, Prime Video, etc.).
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={editServiceForm.usaPin}
+                  onChange={(e) => setEditServiceForm({ ...editServiceForm, usaPin: e.target.checked })}
+                  className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
                 />
               </div>
 
@@ -1251,6 +1647,208 @@ export default function CatalogPage() {
               >
                 {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 <span>Eliminar Plan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL: NUEVO COMBO PROMOCIONAL (SRS RF-006) */}
+      {showComboModal && (
+        <div className="fixed inset-0 z-[10010] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-950 border border-purple-900/50 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between p-5 border-b border-gray-850 shrink-0 bg-gray-950/95">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
+                  <Package className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Nuevo Combo de Plataformas</h3>
+                  <span className="text-[10px] text-purple-400 font-semibold">Paquete Multi-Servicio con Ahorro Garantizado</span>
+                </div>
+              </div>
+              <button onClick={() => setShowComboModal(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCombo} className="flex-1 flex flex-col overflow-hidden">
+              <div className="p-6 space-y-4 flex-1 overflow-y-auto text-xs">
+                {formError && (
+                  <div className="bg-red-950/50 border border-red-800 text-red-300 px-3 py-2 rounded-xl text-xs">
+                    {formError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1">Nombre del Combo *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newCombo.nombre}
+                    onChange={(e) => setNewCombo({ ...newCombo, nombre: e.target.value })}
+                    placeholder="Ej. Combo Dúo (Netflix + Disney+)"
+                    className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1">Descripción / Beneficios</label>
+                  <input
+                    type="text"
+                    value={newCombo.descripcion}
+                    onChange={(e) => setNewCombo({ ...newCombo, descripcion: e.target.value })}
+                    placeholder="Ej. 2 pantallas independientes para ver simultáneamente sin cortes"
+                    className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Selección de Planes del Combo */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-purple-300 uppercase tracking-wider">
+                      Planes que Componen el Combo (Mínimo 2)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNewCombo({
+                          ...newCombo,
+                          items: [...newCombo.items, { planId: '', cantidad: 1 }],
+                        })
+                      }
+                      className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> Agregar otra plataforma
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {newCombo.items.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-gray-900 border border-gray-800">
+                        <select
+                          required
+                          value={item.planId}
+                          onChange={(e) => {
+                            const updated = [...newCombo.items];
+                            updated[idx].planId = e.target.value;
+                            setNewCombo({ ...newCombo, items: updated });
+                          }}
+                          className="flex-1 bg-gray-950 border border-gray-800 rounded-lg px-2.5 py-2 text-white text-xs outline-none focus:border-purple-500"
+                        >
+                          <option value="">Selecciona plataforma y plan</option>
+                          {plans.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.service?.nombre} — {p.nombrePlan} (${Number(p.precio).toLocaleString('es-CO')})
+                            </option>
+                          ))}
+                        </select>
+
+                        {newCombo.items.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = newCombo.items.filter((_, i) => i !== idx);
+                              setNewCombo({ ...newCombo, items: updated });
+                            }}
+                            className="p-2 text-gray-500 hover:text-rose-400 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Cálculo Dinámico de Precios */}
+                <div className="p-4 rounded-xl bg-purple-950/20 border border-purple-900/40 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400">Suma de precios regulares:</span>
+                    <span className="text-white font-bold font-mono">
+                      ${computedComboRegularTotal.toLocaleString('es-CO')} COP
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-300 font-semibold mb-1">
+                      Precio Promocional del Combo (COP) *
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={1000}
+                      value={newCombo.precioCombo}
+                      onChange={(e) => setNewCombo({ ...newCombo, precioCombo: e.target.value })}
+                      placeholder={`Menor a ${computedComboRegularTotal || 20000}`}
+                      className="w-full bg-gray-900 border border-purple-800/60 rounded-xl px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+
+                  {Number(newCombo.precioCombo) > 0 && (
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-purple-900/30">
+                      <span className="text-gray-400">Ahorro para el cliente:</span>
+                      <span
+                        className={`font-bold ${
+                          computedComboDiscount.isValid ? 'text-emerald-400' : 'text-rose-400 font-extrabold'
+                        }`}
+                      >
+                        {computedComboDiscount.isValid
+                          ? `$${computedComboDiscount.ahorro.toLocaleString('es-CO')} (${computedComboDiscount.porcentaje}%)`
+                          : '⚠️ El precio debe ser menor que la suma individual'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 sm:p-5 border-t border-gray-850 shrink-0 bg-gray-950 flex items-center justify-end gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowComboModal(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={formLoading || !computedComboDiscount.isValid}
+                  className="px-5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold rounded-xl flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-lg shadow-purple-950/40"
+                >
+                  {formLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Guardar Combo</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAR ELIMINAR COMBO */}
+      {comboToDelete && (
+        <div className="fixed inset-0 z-[10010] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-950 border border-gray-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-rose-500" />
+              <span>Eliminar Combo Promocional</span>
+            </h3>
+            <p className="text-xs text-gray-400">
+              ¿Estás seguro de que deseas desactivar el combo <span className="text-white font-semibold">{comboToDelete.nombre}</span>?
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setComboToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-gray-800 text-gray-400 hover:text-white text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteCombo}
+                disabled={formLoading}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl"
+              >
+                Eliminar
               </button>
             </div>
           </div>

@@ -214,7 +214,7 @@ export default function AdminLayout({
   return (
     <div className="min-h-screen bg-[#030712] text-gray-100 flex">
       {/* SIDEBAR ESCRITORIO */}
-      <aside className="hidden lg:flex w-64 flex-col fixed inset-y-0 z-30 bg-gray-950/80 backdrop-blur-xl border-r border-gray-800/80">
+      <aside className="hidden lg:flex w-64 flex-col fixed inset-y-0 z-30 bg-[#030712] border-r border-gray-800">
         {/* Logo */}
         <div className="h-16 px-6 flex items-center gap-3 border-b border-gray-850">
           <div
@@ -272,15 +272,15 @@ export default function AdminLayout({
         </div>
 
         {/* Usuario y Cierre de Sesión */}
-        <div className="p-3 border-t border-gray-850/80 bg-gray-950/40">
-          <div className="flex items-center justify-between p-2 rounded-xl bg-gray-900/60 border border-gray-800/60">
+        <div className="p-3 border-t border-gray-850 bg-[#030712]">
+          <div className="flex items-center justify-between p-2 rounded-xl bg-gray-900 border border-gray-800">
             <div className="flex items-center gap-2.5 overflow-hidden">
               <div className="w-8 h-8 rounded-lg bg-red-950 border border-red-800/60 flex items-center justify-center text-red-400 shrink-0">
                 <Shield className="w-4 h-4" />
               </div>
               <div className="overflow-hidden">
                 <p className="text-xs font-semibold text-white truncate">{user.nombre}</p>
-                <span className="inline-block text-[9px] font-bold text-red-400 bg-red-950/60 px-1.5 py-0.2 rounded border border-red-900/40 uppercase">
+                <span className="inline-block text-[9px] font-bold text-red-400 bg-red-950 px-1.5 py-0.2 rounded border border-red-900 uppercase">
                   {user.rol}
                 </span>
               </div>
@@ -299,7 +299,7 @@ export default function AdminLayout({
       {/* CONTENIDO PRINCIPAL */}
       <div className="flex-1 flex flex-col lg:pl-64 min-w-0">
         {/* Topbar */}
-        <header className="h-16 sticky top-0 z-20 bg-gray-950/80 backdrop-blur-xl border-b border-gray-850 px-4 sm:px-6 flex items-center justify-between">
+        <header className="h-16 sticky top-0 z-20 bg-[#030712] border-b border-gray-850 px-4 sm:px-6 flex items-center justify-between shadow-xl">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}

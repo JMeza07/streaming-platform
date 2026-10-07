@@ -21,4 +21,12 @@ export class RequestWarrantyDto {
   @IsOptional()
   @IsString()
   evidenciaUrl?: string; // URL de la imagen/video del error
+
+  @IsOptional()
+  @IsString()
+  claveReportada?: string; // Clave ingresada por el cliente para verificar coincidencia
+
+  @IsOptional()
+  @IsString()
+  tipoError?: string; // Clasificación detallada del error (RF-020)
 }

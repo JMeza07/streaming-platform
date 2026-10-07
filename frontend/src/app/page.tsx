@@ -6,6 +6,7 @@ import api from '@/lib/api';
 import Cookies from 'js-cookie';
 import { useDialog } from '@/components/Dialog';
 import { useSettings, BrandTwoToneText } from '@/context/SettingsContext';
+import HeroParallaxBackground from '@/components/HeroParallaxBackground';
 import {
   Tv,
   Zap,
@@ -45,7 +46,7 @@ import {
 
 export default function HomePage() {
   const { alert } = useDialog();
-  const { systemName, systemLogo } = useSettings();
+  const { systemName, systemLogo, heroConfig } = useSettings();
   const [services, setServices] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(null);
@@ -518,13 +519,13 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#030712] text-gray-100 flex flex-col selection:bg-red-600 selection:text-white">
-      {/* Background glow effects */}
-      <div className="pointer-events-none fixed -top-40 left-1/2 -translate-x-1/2 w-[800px] h-[550px] bg-red-600/15 rounded-full blur-[160px]" />
-      <div className="pointer-events-none fixed top-1/3 -left-40 w-[600px] h-[500px] bg-purple-600/10 rounded-full blur-[160px]" />
+    <div className="min-h-screen bg-[#030712] text-gray-100 flex flex-col selection:bg-red-600 selection:text-white relative overflow-x-hidden">
+      {/* Dynamic Netflix-Style Parallax Hero Background */}
+      <HeroParallaxBackground config={heroConfig} />
 
-      {/* NAVBAR */}
-      <header className="sticky top-0 z-30 bg-gray-950/80 backdrop-blur-xl border-b border-gray-850 px-4 sm:px-8 h-16 flex items-center justify-between">
+
+      {/* NAVBAR FIJA */}
+      <header className="sticky top-0 z-50 bg-[#030712] border-b border-gray-800 px-4 sm:px-8 h-16 flex items-center justify-between shadow-xl">
         <Link href="/" className="flex items-center gap-2.5">
           <div
             className={`w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden shrink-0 ${
@@ -704,9 +705,9 @@ export default function HomePage() {
       {/* BANNER RÁPIDO: BUSCADOR DE CUENTA PARA CLIENTES REGISTRADOS */}
       {!user && (
         <section className="relative z-10 px-4 sm:px-6 max-w-4xl mx-auto w-full -mt-4 mb-4">
-          <div className="bg-gradient-to-r from-gray-900/90 via-gray-900/70 to-gray-950/90 border border-gray-800/90 rounded-2xl p-5 backdrop-blur-xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3.5 text-left">
-              <div className="w-10 h-10 rounded-xl bg-red-600/20 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-red-950 border border-red-800 flex items-center justify-center text-red-400 shrink-0">
                 <Search className="w-5 h-5" />
               </div>
               <div>
@@ -752,7 +753,7 @@ export default function HomePage() {
             className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
               selectedCategory === 'all'
                 ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                : 'bg-gray-900/80 text-gray-400 hover:text-white border border-gray-800'
+                : 'bg-[#0b0f19] text-gray-300 hover:text-white border border-gray-800'
             }`}
           >
             Todas las Plataformas ({plans.length})
@@ -764,7 +765,7 @@ export default function HomePage() {
               className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer flex items-center gap-2 ${
                 selectedCategory === s.id
                   ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                  : 'bg-gray-900/80 text-gray-400 hover:text-white border border-gray-800'
+                  : 'bg-[#0b0f19] text-gray-300 hover:text-white border border-gray-800'
               }`}
             >
               {s.logoUrl && <img src={s.logoUrl} alt="" className="w-3.5 h-3.5 object-contain" />}
@@ -786,7 +787,7 @@ export default function HomePage() {
               return (
                 <div
                   key={plan.id}
-                  className="bg-gray-900/60 border border-gray-800/80 hover:border-red-600/50 rounded-2xl p-6 backdrop-blur-md flex flex-col justify-between space-y-6 transition-all hover:shadow-2xl hover:shadow-red-950/20 group"
+                  className="bg-[#0b0f19] border border-gray-800 hover:border-red-600/50 rounded-2xl p-6 shadow-2xl flex flex-col justify-between space-y-6 transition-all hover:shadow-2xl group"
                 >
                   <div className="space-y-4">
                     {/* Header de la tarjeta */}
@@ -796,7 +797,7 @@ export default function HomePage() {
                           <img
                             src={service.logoUrl}
                             alt={service.nombre}
-                            className="w-10 h-10 object-contain rounded-xl bg-black/40 p-1 border border-gray-800 shrink-0"
+                            className="w-10 h-10 object-contain rounded-xl bg-black p-1 border border-gray-800 shrink-0"
                           />
                         ) : (
                           <div className="w-10 h-10 rounded-xl bg-red-950 flex items-center justify-center font-bold text-red-400">
@@ -816,12 +817,12 @@ export default function HomePage() {
                       {/* Insignia de Stock */}
                       <div>
                         {plan.stockDisponible !== undefined && plan.stockDisponible <= 0 ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-950/80 text-red-400 border border-red-800/80 shadow-sm shadow-red-950/50">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-red-950 text-red-400 border border-red-800 shadow-sm">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
                             <span>Agotado</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950/60 text-emerald-400 border border-emerald-800/50">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             <span>{plan.stockDisponible !== undefined ? `${plan.stockDisponible} en stock` : 'Disponible'}</span>
                           </span>
@@ -835,7 +836,7 @@ export default function HomePage() {
                         <span className="text-3xl font-black text-white">{formatCOP(plan.precio)}</span>
                         <span className="text-xs text-gray-400">/ {plan.duracionDias} días</span>
                       </div>
-                      <span className="inline-block mt-1 text-[11px] text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded">
+                      <span className="inline-block mt-1 text-[11px] text-emerald-300 font-semibold bg-emerald-950 border border-emerald-800 px-2 py-0.5 rounded">
                         Garantía de reposición {plan.garantiaDias} días
                       </span>
                     </div>
@@ -869,7 +870,7 @@ export default function HomePage() {
                   {plan.stockDisponible !== undefined && plan.stockDisponible <= 0 ? (
                     <button
                       disabled
-                      className="w-full py-3 bg-gray-800 text-gray-400 border border-gray-750 text-xs font-bold rounded-xl shadow-none flex items-center justify-center gap-2 cursor-not-allowed opacity-60"
+                      className="w-full py-3 bg-gray-900 text-gray-500 border border-gray-800 text-xs font-bold rounded-xl shadow-none flex items-center justify-center gap-2 cursor-not-allowed"
                     >
                       <AlertCircle className="w-4 h-4 text-red-400" />
                       <span>Agotado Temporalmente</span>
@@ -900,8 +901,8 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-gray-900/40 border border-gray-800/80 rounded-2xl p-6 backdrop-blur-md space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-red-600/20 border border-red-500/30 flex items-center justify-center text-red-400">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-6 shadow-xl space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-red-950 border border-red-800 flex items-center justify-center text-red-400">
               <Zap className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-bold text-white">Despacho Inmediato</h3>
@@ -910,8 +911,8 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="bg-gray-900/40 border border-gray-800/80 rounded-2xl p-6 backdrop-blur-md space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-6 shadow-xl space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-bold text-white">Garantía Anti-Caídas</h3>
@@ -920,8 +921,8 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="bg-gray-900/40 border border-gray-800/80 rounded-2xl p-6 backdrop-blur-md space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-6 shadow-xl space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-950 border border-blue-800 flex items-center justify-center text-blue-400">
               <Tv className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-bold text-white">Portal de Autogestión</h3>
@@ -930,8 +931,8 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="bg-gray-900/40 border border-gray-800/80 rounded-2xl p-6 backdrop-blur-md space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl p-6 shadow-xl space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-950 border border-amber-800 flex items-center justify-center text-amber-400">
               <Phone className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-bold text-white">Recordatorios WhatsApp</h3>

@@ -124,6 +124,12 @@ export class WarrantyService {
         },
         motivo: ticket.motivoReporte,
         motivoReporte: ticket.motivoReporte,
+        tipoError: ticket.tipoError,
+        claveReportada: ticket.claveReportada,
+        claveAlMomento: ticket.claveAlMomento,
+        coincideClave: ticket.coincideClave,
+        claveNuevaEntregada: ticket.claveNuevaEntregada,
+        notificadoAlCliente: ticket.notificadoAlCliente,
         evidenciaUrl: ticket.evidenciaUrl,
         estado: ticket.estado,
         tiempoEnCola: this.calcularTiempoEnCola(ticket.createdAt, ahora),
@@ -232,6 +238,12 @@ export class WarrantyService {
       },
       motivo: ticket.motivoReporte,
       motivoReporte: ticket.motivoReporte,
+      tipoError: ticket.tipoError,
+      claveReportada: ticket.claveReportada,
+      claveAlMomento: ticket.claveAlMomento,
+      coincideClave: ticket.coincideClave,
+      claveNuevaEntregada: ticket.claveNuevaEntregada,
+      notificadoAlCliente: ticket.notificadoAlCliente,
       evidenciaUrl: ticket.evidenciaUrl,
       estado: ticket.estado,
       tiempoEnCola: this.calcularTiempoEnCola(ticket.createdAt, ahora),
@@ -387,13 +399,15 @@ export class WarrantyService {
       }
 
       // SI HAY STOCK DISPONIBLE:
-      // 3. Marcar ticket como resuelto y reemplazado
+      // 3. Marcar ticket como resuelto y reemplazado con trazabilidad SGVS
       await tx.supportTicket.update({
         where: { id: ticket.id },
         data: {
           estado: 'aprobado_reemplazo',
           resueltoPor: adminId,
           resolvedAt: new Date(),
+          claveNuevaEntregada: nuevaCuenta.passwordCuenta,
+          notificadoAlCliente: true,
         },
       });
 
@@ -409,6 +423,9 @@ export class WarrantyService {
         data: {
           accountId: nuevaCuenta.id,
           estado: SubscriptionStatus.ACTIVA,
+          clase: 'GARANTIA',
+          fechaUltimoCambioClave: now,
+          estadoLibre: 'VENDIDA',
           fechaVencimiento: nuevaFechaVencimiento,
           diasPendientes: 0,
           congeladoAt: null,
